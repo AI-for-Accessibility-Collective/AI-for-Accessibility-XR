@@ -1,0 +1,10 @@
+{
+  "id": "bill",
+  "trigger": ["bill", "letter", "statement"],
+  "goal": "understand the letter or bill they are holding up",
+  "brief": [
+    "The wearer holds mail up to the camera: bills, notices, appointment letters.",
+    "What matters to them first: who it is from, what it asks them to do, how much, and by when.",
+    "Amounts and dates must be read exactly as printed — never rounded or inferred."
+  ]
+}

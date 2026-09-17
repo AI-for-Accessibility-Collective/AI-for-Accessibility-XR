@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Appliance Guide · demo</title>
+<style>
+  /* Two surfaces: the wearable's view (dark, left) and the toolkit panel
+     (light, right). The panel shows only what the film is about — which mode
+     is on, how the guide speaks right now, what the wearer agreed to share —
+     plus the few controls needed to run a take. Same page is mounted in the
+     phone webview, so it also stacks at phone width. */
+  :root {
+    --feed-bg:#0e1116; --feed-panel:#161a21; --feed-line:#262c36; --feed-text:#e6e9ee; --feed-muted:#8b94a1;
+    --ink:#1d2330; --muted:#6b7280; --ground:#f5f6f8; --card:#ffffff; --line:#e5e7eb;
+    --blue:#2563eb; --green:#15803d; --green-soft:#e7f6ec;
+    --amber:#b45309; --amber-soft:#fff5e0; --amber-line:#f2cf85; --red:#dc2626;
+    --you:#60a5fa; --guide:#4ade80;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body {
+    background: var(--feed-bg); color: var(--feed-text); font-size: 14px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Inter, sans-serif;
+    display: flex; overflow: hidden;
+  }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .sr-only { position: absolute; left: -9999px; }
+
+  /* ================= wearable view ================= */
+  #main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #feed-wrap { position: relative; flex: 1; min-height: 0; background: #000; overflow: hidden; }
+  #feed { width: 100%; height: 100%; object-fit: contain; display: block; }
+  /* Selfie-style mirror for the webcam — display only; frames sent to Gemini stay unmirrored. */
+  #feed.mirror { transform: scaleX(-1); }
+  #waiting { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--feed-muted); pointer-events: none; }
+
+  /* The one mark on the feed: which take this is. */
+  #mode-badge {
+    position: absolute; top: 14px; left: 14px; z-index: 6;
+    font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+    color: #cfd6de; background: rgba(14,17,22,.8); border: 1px solid #3a424d; padding: 6px 12px; border-radius: 999px;
+  }
+  #mode-badge.toolkit { color: var(--guide); border-color: rgba(74,222,128,.5); }
+
+  #captions {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+    display: flex; flex-direction: column; gap: 8px; padding: 28px 18px 18px;
+    background: linear-gradient(to top, rgba(0,0,0,.75), rgba(0,0,0,0)); pointer-events: none;
+  }
+  .cap {
+    align-self: flex-start; max-width: min(720px, 80%); padding: 10px 14px; border-radius: 12px;
+    font-size: 17px; line-height: 1.4; background: rgba(22,26,33,.94); border: 1px solid var(--feed-line);
+    animation: rise .18s ease-out; transition: opacity .6s ease;
+  }
+  .cap .who { display: block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 2px; opacity: .85; }
+  .cap.user { align-self: flex-end; background: rgba(30,52,84,.94); }
+  .cap.user .who { color: var(--you); }
+  .cap.assistant .who, .cap.learn .who { color: var(--guide); }
+  .cap.learn { background: rgba(18,46,38,.96); border-color: #2c6b58; }
+  .cap.speaking { color: var(--feed-muted); font-style: italic; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* Video source picker (clip / webcam / smartglass stream). */
+  #source-overlay { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.62); z-index: 10; }
+  #source-overlay.show { display: flex; }
+  .src-panel {
+    display: flex; flex-direction: column; gap: 10px; background: var(--feed-panel); border: 1px solid var(--feed-line);
+    border-radius: 14px; padding: 20px; width: min(400px, 88%); box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  .src-panel h3 { font-size: 15px; font-weight: 600; }
+  .src-list { display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto; }
+  .src-row { display: flex; gap: 8px; }
+  .src-row .src-btn { flex: 1; }
+  .src-btn {
+    border: 1px solid var(--feed-line); background: var(--feed-bg); color: var(--feed-text); font-weight: 600;
+    padding: 11px 14px; border-radius: 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .src-btn:hover { border-color: var(--you); color: var(--you); }
+  .src-btn.primary { background: var(--you); color: #06182e; border-color: var(--you); text-align: center; font-weight: 700; }
+  .src-btn.current { border-color: var(--guide); color: var(--guide); }
+  .src-btn.quiet { color: var(--feed-muted); font-weight: 500; }
+  .src-hint { color: var(--feed-muted); font-size: 12px; text-align: center; }
+  .src-link { align-self: center; border: 0; background: none; color: var(--feed-muted); font-size: 12px; text-decoration: underline; }
+  .src-link:hover { color: var(--you); }
+
+  /* What the mic hears (stands in for the glasses mic). */
+  #listening { display: none; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--feed-line); background: var(--feed-panel); font-size: 13px; }
+  #listening.show { display: flex; }
+  #listening .lbl { color: #f87171; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; flex: 0 0 auto; }
+  #listening .live { flex: 1; min-width: 0; }
+  #listening .live.interim { color: var(--feed-muted); font-style: italic; }
+  #listening .live:empty::after { content: 'what you say shows here'; color: var(--feed-muted); font-style: italic; }
+
+  /* ================= toolkit panel ================= */
+  #rail { width: 360px; flex: 0 0 360px; background: var(--ground); color: var(--ink); display: flex; flex-direction: column; font-size: 13px; border-left: 1px solid var(--line); }
+  #rail-header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; background: var(--card); border-bottom: 1px solid var(--line); }
+  #rail-header h1 { font-size: 15px; font-weight: 600; flex: 1; line-height: 1.2; }
+  #rail-header h1 small { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px; }
+  #power-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); cursor: pointer; user-select: none; white-space: nowrap; }
+  #power-label.on { color: var(--green); }
+  .switch { position: relative; width: 36px; height: 20px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch .track { position: absolute; inset: 0; cursor: pointer; background: #cbd0d8; border-radius: 10px; transition: .2s; }
+  .switch .track::before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: #fff; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: .2s; }
+  .switch input:checked + .track { background: var(--green); }
+  .switch input:checked + .track::before { transform: translateX(16px); }
+  .switch input:focus-visible + .track { outline: 2px solid var(--blue); outline-offset: 2px; }
+  /* The one control that ends everything: always visible, one click. */
+  #stop-all { border: 1px solid var(--red); background: var(--card); color: var(--red); border-radius: 6px; font-size: 12px; font-weight: 700; padding: 5px 10px; white-space: nowrap; }
+  #stop-all:hover { background: var(--red); color: #fff; }
+
+  /* Latest status only — a single quiet line, never a log. */
+  #status-line { padding: 7px 14px; font-size: 11.5px; color: var(--muted); background: var(--card); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  #rail-scroll { flex: 1; overflow-y: auto; }
+  #rail-main { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+  .card-h { display: flex; align-items: center; gap: 8px; min-height: 16px; }
+  .card-h .t { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); flex: 1; }
+  .badge { font-size: 10px; font-weight: 700; border-radius: 999px; padding: 2px 8px; background: var(--green-soft); color: var(--green); }
+  .note { font-size: 11.5px; color: var(--muted); line-height: 1.45; }
+
+  /* The A/B switch and, under it, how the guide speaks right now. */
+  .modeseg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .modeseg button { flex: 1; font-size: 13px; font-weight: 600; padding: 9px 0; border: 0; background: var(--card); color: var(--muted); }
+  .modeseg button.active { background: var(--ink); color: #fff; }
+  .modeseg button.active.tk { background: var(--green); }
+  .modeseg button:disabled { opacity: .6; cursor: default; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 999px; background: var(--ground); color: var(--ink); border: 1px solid var(--line); }
+  .chips.adapted .chip { background: var(--green-soft); color: var(--green); border-color: transparent; }
+  .chips.waiting .chip { color: var(--muted); font-weight: 500; }
+
+  /* Consent — the visible half of the spoken question. */
+  #consent-card { background: var(--amber-soft); border-color: var(--amber-line); }
+  #consent-card .t { color: var(--amber); }
+  #consent-text { font-size: 13px; line-height: 1.5; }
+  .row { display: flex; gap: 6px; }
+  .row .btn { flex: 1; }
+  .btn { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 7px; padding: 7px 11px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.p { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .btn.yes { background: var(--green); border-color: var(--green); color: #fff; }
+
+  /* Running a take: Done, Repeat, type a line, what was said. */
+  #done-btn { flex: 1; border: 0; border-radius: 8px; padding: 12px 0; font-size: 15px; font-weight: 700; background: var(--green); color: #fff; }
+  #done-btn:disabled { background: var(--line); color: var(--muted); cursor: default; }
+  #repeat-btn { flex: 0 0 auto; padding: 12px 14px; }
+  #task-line b { color: var(--ink); font-weight: 600; }
+  .say { display: flex; gap: 6px; }
+  .say input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 12.5px; background: var(--card); color: var(--ink); }
+  .say input:focus { outline: none; border-color: var(--blue); }
+  #agent-log { display: flex; flex-direction: column; gap: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
+  .lg { line-height: 1.45; }
+  .lg .tg { font-weight: 700; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; margin-right: 6px; }
+  .lg.user .tg { color: var(--blue); }
+  .lg.assistant .tg, .lg.learn .tg { color: var(--green); }
+  .lg.learn { background: var(--green-soft); border-radius: 6px; padding: 5px 8px; }
+  #agent-empty { color: var(--muted); font-size: 12px; }
+
+  /* The granted profile: plain words, with where each need came from. */
+  .need { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .need:first-child { border-top: 0; padding-top: 0; }
+  .need:last-child { padding-bottom: 0; }
+  .need .k { flex: 1; }
+  .need .v { font-weight: 600; white-space: nowrap; }
+  .need .src { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+  .need .src.learned { color: var(--green); background: var(--green-soft); border-color: transparent; }
+
+  #rail-footer { display: flex; gap: 6px; padding: 10px 12px; background: var(--card); border-top: 1px solid var(--line); }
+  #rail-footer .sp { flex: 1; }
+  #source-btn { font-weight: 500; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
+  #source-btn b { font-weight: 600; }
+
+  /* Shown after ■ Stop, or when the demo process is gone. */
+  #stopped-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(14,17,22,.94); display: flex; align-items: center; justify-content: center; padding: 24px; }
+  #stopped-overlay[hidden] { display: none; }
+  .stopped-card { background: var(--card); color: var(--ink); border-radius: 12px; padding: 24px 28px; max-width: 460px; }
+  .stopped-card h2 { font-size: 20px; margin-bottom: 8px; }
+  .stopped-card p { font-size: 14px; line-height: 1.5; color: var(--muted); margin-top: 6px; }
+  .stopped-card code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--ground); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+
+  @media (max-width: 760px) {
+    body { flex-direction: column; overflow: auto; }
+    #main { flex: 0 0 auto; }
+    #feed-wrap { flex: 0 0 auto; aspect-ratio: 16 / 9; max-width: 100%; }
+    #rail { width: auto; flex: 1 1 auto; border-left: 0; border-top: 1px solid var(--line); }
+    #rail-scroll { overflow: visible; }
+    #source-btn { max-width: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .cap { animation: none; } }
+</style>
+</head>
+<body>
+  <!-- ============ wearable view ============ -->
+  <div id="main">
+    <div id="feed-wrap">
+      <span id="waiting">waiting for video…</span>
+      <img id="feed" alt="live wearable view" />
+      <span id="mode-badge">baseline</span>
+      <div id="captions"></div>
+      <div id="source-overlay"></div>
+    </div>
+    <div id="listening">
+      <span class="lbl">● Listening</span>
+      <span class="live" id="live-transcript"></span>
+    </div>
+  </div>
+
+  <!-- ============ toolkit panel ============ -->
+  <aside id="rail" aria-label="Toolkit panel">
+    <div id="rail-header">
+      <h1>Appliance Guide <small>the same guide, without and with the toolkit</small></h1>
+      <label id="power-label" for="power" title="Start/pause the guide (Gemini)">▶ Start</label>
+      <label class="switch" title="Start/pause the guide (Gemini)">
+        <input type="checkbox" id="power" aria-label="Guide on/off">
+        <span class="track"></span>
+      </label>
+      <button id="stop-all" title="Turn Gemini off and shut the demo down">■ Stop</button>
+    </div>
+    <div id="status-line" aria-live="polite">Pick a video source to begin.</div>
+
+    <div id="rail-scroll">
+      <div id="rail-main">
+
+        <!-- Consent card (hidden until the guide asks) -->
+        <section class="card" id="consent-card" hidden>
+          <div class="card-h"><span class="t" id="consent-title">Permission request</span></div>
+          <p id="consent-text"></p>
+          <div class="row">
+            <button class="btn yes" id="consent-yes">Yes, that's okay</button>
+            <button class="btn" id="consent-no">Not now</button>
+          </div>
+        </section>
+
+        <!-- Mode (the A/B switch) + how the guide speaks right now -->
+        <section class="card" id="mode-card">
+          <div class="card-h"><span class="t">Guide mode</span><span class="note" id="mode-status"></span></div>
+          <div class="modeseg" id="modeseg">
+            <button data-mode="baseline">Baseline</button>
+            <button data-mode="toolkit" class="tk">Toolkit</button>
+          </div>
+          <div class="chips" id="delivery-chips"></div>
+          <div class="note" id="mode-note"></div>
+        </section>
+
+        <!-- Running the take -->
+        <section class="card" id="guide-card">
+          <div class="card-h">
+            <span class="t">Guide</span>
+            <span class="note" id="task-line" hidden>Task: <b id="task-name"></b> · step <span id="task-step">0</span></span>
+          </div>
+          <div class="row">
+            <button id="done-btn" title="Tell the guide this step is done">✓ Done — next step</button>
+            <button class="btn" id="repeat-btn" title="Ask the guide to say that again">↻ Repeat</button>
+          </div>
+          <div class="say">
+            <label for="say" class="sr-only">Say something to the guide</label>
+            <input id="say" placeholder='Type “help me start the washing machine”' autocomplete="off">
+            <button class="btn p" id="send" aria-label="Send">▶</button>
+          </div>
+          <div id="agent-log"><div id="agent-empty">Nothing yet. Press ▶ Start, then talk or type.</div></div>
+        </section>
+
+        <!-- My Profile (the granted AbilityModel slice) -->
+        <section class="card" id="profile-card">
+          <div class="card-h"><span class="t">My Profile</span><span class="badge" id="profile-badge" hidden>granted</span></div>
+          <div id="profile-body"></div>
+        </section>
+
+      </div>
+    </div>
+
+    <div id="rail-footer">
+      <button class="btn" id="source-btn" title="Change the video source">Source: <b id="source-pill-v">—</b> ▾</button>
+      <span class="sp"></span>
+      <button class="btn" id="reset" title="Wipe the app store and re-import the fixture profile">↺ Reset take</button>
+    </div>
+  </aside>
+
+  <div id="stopped-overlay" hidden role="alertdialog" aria-labelledby="stopped-title" aria-describedby="stopped-text">
+    <div class="stopped-card">
+      <h2 id="stopped-title">Stopped</h2>
+      <p id="stopped-text">Gemini is off and the demo has shut down. Nothing is running.</p>
+      <p id="stopped-next">To start again, run <code>bun run demo</code> and reload this page.</p>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const feed = $('feed'), waiting = $('waiting'), captions = $('captions');
+
+  // When the source is the glasses, THEY are the speaker — don't also play the
+  // reply through this browser. Browser TTS stays on only for the
+  // hardware-free sources (file/webcam) that have no glasses speaker.
+  let currentSource = '';
+  let captionsMirror = false;
+
+  // Set once ■ Stop is pressed or the demo process is gone: the page stops
+  // speaking, listening, polling and sending anything.
+  let stopped = false;
+  let canShutdown = true;
+  let stopMic = () => {};
+
+  // ---- live feed (MJPEG, with a polling fallback) ----
+  let polling = false;
+  function startPolling() {
+    if (polling) return;
+    polling = true;
+    feed.onerror = null;
+    setInterval(() => { if (!stopped) feed.src = '/frame.jpg?t=' + Date.now(); }, 150);
+  }
+  feed.onerror = startPolling;
+  feed.onload = () => { waiting.style.display = 'none'; };
+  feed.src = '/stream.mjpg';
+
+  // ---- speak-aloud ----
+  // Gemini TTS via the server (/tts prepends the render's style line); the
+  // browser voice only if Gemini TTS is unavailable.
+  let currentAudio = null;
+  async function speak(text) {
+    if (stopped) return;
+    try {
+      const r = await fetch('/tts?text=' + encodeURIComponent(text));
+      if (r.ok && !stopped) {
+        const url = URL.createObjectURL(await r.blob());
+        try { if (currentAudio) currentAudio.pause(); } catch {}
+        currentAudio = new Audio(url);
+        currentAudio.onended = () => URL.revokeObjectURL(url);
+        await currentAudio.play();
+        return;
+      }
+    } catch {}
+    if (!stopped && window.speechSynthesis) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.0;
+      window.speechSynthesis.speak(u);
+    }
+  }
+
+  // ---- captions (on the feed) ----
+  // Assistant lines show as real captions only when the granted profile asks
+  // for captions — in baseline the overlay shows just “Speaking…”. That
+  // asymmetry IS the filmed feature.
+  const LABELS = { user: 'You', assistant: 'Guide', learn: 'Learned' };
+  function addCaption(e) {
+    if (!LABELS[e.type]) return;
+    const speakingOnly = e.type === 'assistant' && !captionsMirror;
+    const el = document.createElement('div');
+    el.className = 'cap ' + e.type + (speakingOnly ? ' speaking' : '');
+    el.innerHTML = '<span class="who"></span>';
+    el.querySelector('.who').textContent = LABELS[e.type];
+    el.appendChild(document.createTextNode(speakingOnly ? 'Speaking…' : e.text));
+    captions.appendChild(el);
+    while (captions.children.length > 4) captions.removeChild(captions.firstChild);
+    setTimeout(() => { el.style.opacity = '0'; }, 7000);
+    setTimeout(() => { el.remove(); }, 7800);
+  }
+
+  // ---- conversation log (You / Guide / Learned) + one status line ----
+  const agentLog = $('agent-log');
+  function addLog(e) {
+    if (!LABELS[e.type]) {
+      // status / hud: the latest one, in the quiet line under the header
+      const line = $('status-line');
+      line.textContent = e.text;
+      line.title = e.text;
+      return;
+    }
+    const empty = $('agent-empty');
+    if (empty) empty.remove();
+    const row = document.createElement('div');
+    row.className = 'lg ' + e.type;
+    const tag = document.createElement('span'); tag.className = 'tg';
+    tag.textContent = LABELS[e.type];
+    row.appendChild(tag);
+    row.appendChild(document.createTextNode(e.text));
+    agentLog.appendChild(row);
+    while (agentLog.children.length > 200) agentLog.removeChild(agentLog.firstChild);
+    agentLog.scrollTop = agentLog.scrollHeight;
+  }
+
+  // ---- events (SSE) ----
+  function handle(e) {
+    if (stopped) return;
+    addLog(e);
+    addCaption(e);
+    // Don't double the glasses speaker: only the browser speaks for sources
+    // with no real speaker (file/webcam). On glasses, the glasses say it.
+    if (e.type === 'assistant' && currentSource !== 'glasses') speak(e.text);
+  }
+  const es = new EventSource('/events');
+  es.onmessage = (ev) => { try { handle(JSON.parse(ev.data)); } catch {} };
+
+  // ---- say (POST /say) ----
+  const sayInput = $('say');
+  function sendText(text) {
+    if (!text || stopped) return;
+    fetch('/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, typed: true }) });
+  }
+  function send() {
+    const text = sayInput.value.trim();
+    if (!text) return;
+    sayInput.value = '';
+    sendText(text);
+  }
+  $('send').onclick = send;
+  sayInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') send(); });
+
+  // ---- guide controls: Done / Repeat ("stop" can be typed) ----
+  $('done-btn').onclick = () => sendText('done');
+  $('repeat-btn').onclick = () => sendText('repeat');
+
+  // ---- consent card ----
+  let consentCardId = null;
+  function renderConsent(cardState) {
+    const sec = $('consent-card');
+    if (!cardState) { sec.hidden = true; consentCardId = null; return; }
+    if (consentCardId === cardState.id && !sec.hidden) return;
+    consentCardId = cardState.id;
+    $('consent-title').textContent = cardState.kind === 'grant' ? 'Permission request' : 'Suggestion from your guide';
+    $('consent-text').textContent = cardState.body;
+    sec.hidden = false;
+  }
+  function answerConsent(response) {
+    if (stopped) return;
+    fetch('/consent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response }) });
+    $('consent-card').hidden = true;
+  }
+  $('consent-yes').onclick = () => answerConsent('accept');
+  $('consent-no').onclick = () => answerConsent('declineOnce');
+
+  // ---- master toggle: start/pause the guide (POST /active) ----
+  const powerInput = $('power');
+  let active = false;
+  let lastActiveAt = 0;
+  function renderPower() {
+    powerInput.checked = active;
+    const pl = $('power-label');
+    pl.textContent = active ? '● Live' : '▶ Start';
+    pl.classList.toggle('on', active);
+  }
+  powerInput.onchange = () => {
+    if (stopped) return;
+    active = powerInput.checked; lastActiveAt = Date.now(); renderPower();
+    fetch('/active', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active }) });
+  };
+  renderPower();
+
+  // ---- mode (the A/B switch) + delivery chips ----
+  const modeButtons = Array.from($('modeseg').querySelectorAll('button'));
+  let currentMode = 'baseline';
+  let lastModeAt = 0;
+  function renderMode(state) {
+    currentMode = state.mode;
+    const toolkit = state.mode === 'toolkit';
+    const waiting = toolkit && !state.granted;
+    modeButtons.forEach((b) => {
+      b.classList.toggle('active', b.dataset.mode === state.mode);
+      b.disabled = state.switching;
+    });
+    $('mode-status').textContent = state.switching ? 'switching…' : '';
+    const badge = $('mode-badge');
+    badge.textContent = toolkit ? 'Toolkit' + (state.granted ? ' · profile on' : '') : 'Baseline';
+    badge.classList.toggle('toolkit', toolkit);
+
+    // How the guide speaks right now — the output side of the adaptation.
+    const chips = $('delivery-chips');
+    chips.innerHTML = '';
+    chips.className = 'chips' + (toolkit && state.granted ? ' adapted' : '') + (waiting ? ' waiting' : '');
+    const items = state.switching ? [] : waiting ? ['waiting for consent'] : [
+      (Number(state.rate) || 1).toFixed(1) + '× speed',
+      state.deliveryMode === 'stepwise' ? 'one step at a time' : 'all at once',
+      state.captionsMirror ? 'captions' : 'no captions',
+    ];
+    for (const t of items) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = t; chips.appendChild(c); }
+    $('mode-note').textContent = state.switching ? ''
+      : !toolkit ? 'Same model, raw answer, default delivery.'
+      : state.granted ? 'Same model — prompt and delivery adapted to the profile below.'
+      : 'The guide asks the wearer before reading their profile.';
+  }
+  modeButtons.forEach((b) => {
+    b.onclick = () => {
+      if (stopped || b.dataset.mode === currentMode) return;
+      lastModeAt = Date.now();
+      renderMode({ mode: b.dataset.mode, switching: true, granted: false, rate: 1, deliveryMode: 'continuous', captionsMirror: false });
+      fetch('/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: b.dataset.mode }) });
+    };
+  });
+
+  // ---- My Profile (granted needs, in plain words, with provenance) ----
+  const NEED_LABELS = {
+    readAloudRate: (v) => ['Speaking rate', Number(v).toFixed(1) + '×'],
+    pacing: (v) => ['Pacing', v === 'stepwise' ? 'one step at a time' : String(v)],
+    simplify: (v) => ['Plain words', v ? 'on' : 'off'],
+    captions: (v) => ['Captions', v ? 'on' : 'off'],
+    spokenDetail: (v) => ['Detail', v === 'gist' ? 'gist first' : String(v)],
+    voicePitch: (v) => ['Voice', String(v)],
+  };
+  const SOURCE_LABELS = { 'setup-script': 'set up', 'onboarding-derived': 'onboarding', 'wearable-extension-insight': 'learned here' };
+  let profileKey = '';
+  function renderProfile(state) {
+    const key = state.mode + '|' + state.granted + '|' + JSON.stringify(state.needs || []);
+    if (key === profileKey) return;
+    profileKey = key;
+    const body = $('profile-body');
+    body.innerHTML = '';
+    $('profile-badge').hidden = !state.granted;
+    if (!state.granted) {
+      const d = document.createElement('div'); d.className = 'note';
+      d.textContent = state.mode === 'toolkit'
+        ? 'Not shared yet — answer the spoken question, or tap the card above.'
+        : 'Not in use. Switch to Toolkit; the guide asks before reading it.';
+      body.appendChild(d);
+      return;
+    }
+    for (const n of state.needs || []) {
+      const [label, value] = (NEED_LABELS[n.dimension] || ((v) => [n.dimension, JSON.stringify(v)]))(n.value);
+      const row = document.createElement('div'); row.className = 'need';
+      row.title = n.dimension + ': ' + JSON.stringify(n.value) + (n.source ? ' · source ' + n.source : '');
+      const k = document.createElement('span'); k.className = 'k'; k.textContent = label;
+      const v = document.createElement('span'); v.className = 'v'; v.textContent = value;
+      const s = document.createElement('span'); s.className = 'src' + (n.source === 'wearable-extension-insight' ? ' learned' : '');
+      s.textContent = SOURCE_LABELS[n.source] || n.source || '';
+      row.appendChild(k); row.appendChild(v); if (s.textContent) row.appendChild(s);
+      body.appendChild(row);
+    }
+  }
+
+  // ---- task line + Done ----
+  function renderTask(state) {
+    const t = state.task;
+    $('task-line').hidden = !t;
+    if (t) { $('task-name').textContent = t.id; $('task-step').textContent = String(t.stepCount); }
+    $('done-btn').disabled = !(t && t.active && state.deliveryMode === 'stepwise');
+  }
+
+  // ---- footer: Reset take ----
+  $('reset').onclick = async () => {
+    if (stopped) return;
+    if (!confirm('Reset the take? Wipes the app store and re-imports the fixture profile.')) return;
+    try { await fetch('/reset', { method: 'POST' }); } catch {}
+  };
+
+  // ---- status polling ----
+  let pollFailures = 0;
+  async function poll() {
+    if (stopped) return;
+    try {
+      const r = await fetch('/status'); const s = await r.json();
+      pollFailures = 0;
+      currentSource = s.source;
+      canShutdown = s.canShutdown !== false;
+      applyFeedBlank(currentSource === 'none');
+      feed.classList.toggle('mirror', currentSource === 'webcam');
+      if (typeof s.active === 'boolean' && Date.now() - lastActiveAt > 1500) { active = s.active; renderPower(); }
+      const st = s.state || {};
+      captionsMirror = !!st.captionsMirror;
+      if (Date.now() - lastModeAt > 1500) renderMode(st);
+      renderProfile(st);
+      renderTask(st);
+      renderConsent(st.consentCard);
+      // Source button + picker state.
+      sourceCatalog = s.sourceCatalog || null;
+      canSetSource = !!s.canSetSource;
+      currentClipId = s.currentClipId || null;
+      $('source-pill-v').textContent =
+        s.source === 'file' ? 'clip · ' + (s.currentClipId || '?')
+        : s.source === 'none' ? 'none'
+        : s.source === 'rtmp' ? 'smartglass stream' : s.source;
+      if (canSetSource && s.source === 'none') pickerOpen = true;
+      renderOverlay();
+    } catch {
+      // Three missed polls in a row: the demo process is gone, so nothing on
+      // this machine is calling Gemini for this page any more.
+      if (++pollFailures >= 3) {
+        showStopped('The demo is not running, so nothing here can call Gemini.');
+      }
+    }
+  }
+  poll();
+  const pollTimer = setInterval(poll, 1000);
+
+  // ---- STOP: turn Gemini off and shut the demo down ----
+  function showStopped(text, next) {
+    stopped = true;
+    clearInterval(pollTimer);
+    try { stopMic(); } catch {}
+    try { if (camStarted) stopWebcam(true); } catch {}
+    try { if (currentAudio) currentAudio.pause(); } catch {}
+    try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch {}
+    try { es.close(); } catch {}
+    $('stopped-text').textContent = text;
+    if (next) $('stopped-next').textContent = next;
+    $('stopped-overlay').hidden = false;
+  }
+  $('stop-all').onclick = () => {
+    if (canShutdown) {
+      showStopped('Gemini is off and the demo has shut down. Nothing is running.');
+      fetch('/shutdown', { method: 'POST' }).catch(() => {});
+    } else {
+      // Mounted inside the glasses app: pause Gemini and the camera here; the
+      // app itself is stopped where it runs.
+      fetch('/active', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: false }) }).catch(() => {});
+      showStopped(
+        'Gemini and the glasses camera are paused.',
+        'To shut the glasses app down, press Ctrl-C where it runs, or run bun run stop.',
+      );
+    }
+  };
+
+  // Closing or reloading this page pauses Gemini right away (the server also
+  // pauses it a few seconds after the last page disappears).
+  window.addEventListener('pagehide', () => {
+    if (stopped || !active) return;
+    try {
+      navigator.sendBeacon('/active', new Blob([JSON.stringify({ active: false })], { type: 'application/json' }));
+    } catch {}
+  });
+
+  // ---- video source: picker (clip / webcam / smartglass) + webcam capture ----
+  let sourceCatalog = null;
+  let canSetSource = false;
+  let currentClipId = null;
+  let pickerOpen = false;
+  const overlay = $('source-overlay');
+
+  let lastFeedBlank = null;
+  function applyFeedBlank(blank) {
+    if (blank === lastFeedBlank) return;
+    lastFeedBlank = blank;
+    if (blank) {
+      feed.style.display = 'none';
+      waiting.textContent = 'No video source yet';
+      waiting.style.display = '';
+    } else {
+      feed.style.display = '';
+      waiting.textContent = 'waiting for video…';
+      waiting.style.display = '';
+      feed.src = '/stream.mjpg?t=' + Date.now();
+    }
+  }
+
+  async function chooseSource(sel) {
+    if (stopped) return;
+    if (currentSource === 'webcam' && sel.kind !== 'webcam') stopWebcam(true);
+    currentSource = sel.kind;
+    if (sel.kind === 'file') currentClipId = sel.clipId || null;
+    pickerOpen = sel.kind === 'none';
+    active = false; lastActiveAt = Date.now(); renderPower();
+    applyFeedBlank(sel.kind === 'none');
+    try {
+      await fetch('/source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(sel) });
+    } catch {}
+    renderOverlay();
+  }
+
+  // Built with the DOM API (textContent) so clip filenames can't inject markup.
+  function renderOverlay() {
+    if (!canSetSource) { overlay.classList.remove('show'); overlay.innerHTML = ''; return; }
+    const camPrompt = !pickerOpen && currentSource === 'webcam' && !camStarted;
+    const show = pickerOpen || camPrompt;
+    overlay.classList.toggle('show', show);
+    overlay.innerHTML = '';
+    if (!show) return;
+    const panel = document.createElement('div'); panel.className = 'src-panel';
+    const mkBtn = (cls, label, onclick) => {
+      const b = document.createElement('button'); b.className = cls; b.textContent = label; b.onclick = onclick;
+      return b;
+    };
+    const mkHint = (text) => { const p = document.createElement('p'); p.className = 'src-hint'; p.textContent = text; return p; };
+
+    if (camPrompt) {
+      panel.appendChild(mkBtn('src-btn primary', '📷 Start webcam', startWebcam));
+      panel.appendChild(mkHint("Uses this device's camera. Gemini stays off until you press ▶ Start."));
+      panel.appendChild(mkBtn('src-link', 'Change source', () => { pickerOpen = true; renderOverlay(); }));
+      overlay.appendChild(panel);
+      return;
+    }
+
+    const h = document.createElement('h3'); h.textContent = 'What should the wearable see?'; panel.appendChild(h);
+    const clips = (sourceCatalog && sourceCatalog.clips) || [];
+    if (clips.length) {
+      const list = document.createElement('div'); list.className = 'src-list';
+      for (const c of clips) {
+        const cur = currentSource === 'file' && c.id === currentClipId;
+        list.appendChild(mkBtn('src-btn' + (cur ? ' current' : ''), '▶ ' + c.name, () => chooseSource({ kind: 'file', clipId: c.id })));
+      }
+      panel.appendChild(list);
+    }
+    const row = document.createElement('div'); row.className = 'src-row';
+    if (!sourceCatalog || sourceCatalog.webcam !== false) {
+      row.appendChild(mkBtn('src-btn' + (currentSource === 'webcam' ? ' current' : ''), '📷 Webcam', () => chooseSource({ kind: 'webcam' })));
+    }
+    if (!sourceCatalog || sourceCatalog.rtmp !== false) {
+      row.appendChild(mkBtn('src-btn' + (currentSource === 'rtmp' ? ' current' : ''), '🥽 Smartglass stream', () => chooseSource({ kind: 'rtmp' })));
+    }
+    panel.appendChild(row);
+    panel.appendChild(mkHint('Gemini stays off until you press ▶ Start.'));
+    if (camStarted) panel.appendChild(mkBtn('src-btn quiet', '■ Stop webcam', () => stopWebcam(false)));
+    if (currentSource && currentSource !== 'none') {
+      panel.appendChild(mkBtn('src-btn quiet', '⏹ No source (blank screen)', () => chooseSource({ kind: 'none' })));
+      panel.appendChild(mkBtn('src-link', 'Cancel', () => { pickerOpen = false; renderOverlay(); }));
+    }
+    overlay.appendChild(panel);
+  }
+
+  $('source-btn').onclick = () => { if (!stopped) { pickerOpen = true; renderOverlay(); } };
+
+  // ---- webcam capture (browser camera as the wearable's eyes) ----
+  let camStream = null;
+  let camTimer = null;
+  let camStarted = false;
+
+  async function startWebcam() {
+    if (stopped) return;
+    try {
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+      const video = document.createElement('video');
+      video.srcObject = camStream; video.muted = true; await video.play();
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      camTimer = setInterval(() => {
+        if (!video.videoWidth || stopped) return;
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        canvas.toBlob((blob) => { if (blob) fetch('/frame', { method: 'POST', body: blob }); }, 'image/jpeg', 0.7);
+      }, 200); // ~5 fps
+      camStarted = true;
+      renderOverlay();
+      // Frames now feed the live view, but Gemini stays OFF until the user
+      // flips the switch — the camera never bills on its own.
+    } catch (err) {
+      alert('Could not start webcam: ' + err);
+    }
+  }
+
+  function stopWebcam(switching) {
+    if (camTimer) { clearInterval(camTimer); camTimer = null; }
+    if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; }
+    camStarted = false;
+    if (!switching && !stopped) {
+      active = false; lastActiveAt = Date.now(); renderPower();
+      fetch('/active', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: false }) });
+      pickerOpen = false;
+    }
+    renderOverlay();
+  }
+
+  // ---- mic: speech input (stands in for the glasses mic) ----
+  // Browser Web Speech API, always listening. The strip under the feed shows
+  // interim words; each finalized phrase is sent to /say (it comes back as a
+  // 'You' caption via SSE). This is also how spoken consent answers arrive.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const listening = $('listening');
+  const liveTranscript = $('live-transcript');
+
+  if (SR) {
+    let recog = null;
+    let micOn = true;
+
+    function setListeningUI(on) {
+      listening.classList.toggle('show', on);
+      if (!on) { liveTranscript.textContent = ''; liveTranscript.classList.remove('interim'); }
+    }
+    function showLive(finalStr, interimStr) {
+      const txt = (finalStr + ' ' + interimStr).trim();
+      liveTranscript.textContent = txt;
+      liveTranscript.classList.toggle('interim', !!interimStr && !finalStr.trim());
+    }
+
+    function startRecog() {
+      recog = new SR();
+      recog.lang = 'en-US';
+      recog.continuous = true;
+      recog.interimResults = true;
+
+      recog.onresult = (ev) => {
+        let interim = '';
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const res = ev.results[i];
+          const phrase = res[0].transcript;
+          if (res.isFinal) {
+            const finalPhrase = phrase.trim();
+            if (finalPhrase && !stopped) {
+              fetch('/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: finalPhrase }) });
+            }
+          } else {
+            interim += phrase;
+          }
+        }
+        showLive('', interim);
+      };
+
+      recog.onerror = (ev) => {
+        if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+          micOn = false; setListeningUI(false);
+          alert('Microphone blocked. Allow mic access for this page, then reload.');
+        } else if (ev.error === 'no-speech' || ev.error === 'aborted') {
+          // transient — onend will restart while micOn
+        } else {
+          liveTranscript.textContent = 'mic error: ' + ev.error;
+        }
+      };
+
+      recog.onend = () => {
+        if (micOn && !heldForGuide) { try { recog.start(); } catch {} }
+        else if (!micOn) setListeningUI(false);
+      };
+
+      try { recog.start(); } catch {}
+    }
+
+    // Echo guard: the page plays the guide's voice through the laptop, and an
+    // open mic would transcribe it and send it back as the wearer's words.
+    // While the guide is speaking the recognizer is stopped; it restarts the
+    // moment playback ends, so an answer right after a question is heard.
+    let heldForGuide = false;
+    const guideSpeaking = () =>
+      !!(currentAudio && !currentAudio.paused && !currentAudio.ended) ||
+      !!(window.speechSynthesis && window.speechSynthesis.speaking);
+    setInterval(() => {
+      if (!micOn || stopped) return;
+      const speakingNow = guideSpeaking();
+      if (speakingNow && !heldForGuide) {
+        heldForGuide = true;
+        try { recog.abort(); } catch {}
+        liveTranscript.classList.add('interim');
+        liveTranscript.textContent = 'paused while the guide speaks…';
+      } else if (!speakingNow && heldForGuide) {
+        heldForGuide = false;
+        liveTranscript.textContent = '';
+        liveTranscript.classList.remove('interim');
+        try { recog.start(); } catch {}
+      }
+    }, 120);
+
+    stopMic = () => {
+      micOn = false;
+      try { if (recog) recog.abort(); } catch {}
+      setListeningUI(false);
+    };
+
+    setListeningUI(true);
+    startRecog();
+  }
+})();
+</script>
+</body>
+</html>

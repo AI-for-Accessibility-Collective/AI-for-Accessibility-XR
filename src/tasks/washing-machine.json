@@ -1,0 +1,19 @@
+{
+  "id": "washing-machine",
+  "trigger": ["washing machine", "washer", "laundry", "a wash", "the wash", "my wash", "the washing", "wash cycle", "wash program"],
+  "goal": "start a cottons wash at 40°C",
+  "brief": [
+    "Front-loading washing machine.",
+    "Dispenser drawer (top-left): compartments I, II, and softener; main-wash detergent goes in compartment II (the largest, left).",
+    "Program selector dial (top): positions include Cottons, Synthetics, Delicates, Spin.",
+    "Temp key cycles 20 → 40 → 60 °C; current value on the display.",
+    "Start/Pause key: press and hold ~2 s until the indicator illuminates."
+  ],
+  "verify": [
+    {
+      "afterActionMentioning": "dial",
+      "prompt": "Is the machine's program dial pointing at 'Cottons'? Answer yes/no/unclear.",
+      "sayOnYes": "I can see it's on Cottons. Good."
+    }
+  ]
+}

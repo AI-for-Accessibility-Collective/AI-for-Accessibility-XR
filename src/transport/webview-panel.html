@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Appliance Guide · control</title>
+<style>
+  :root {
+    --bg:#0b0d10; --panel:#14181d; --line:#232a31; --text:#e8edf2; --muted:#8a96a3;
+    --user:#4ea1ff; --assistant:#46d39a; --alert:#ff6b5e; --on:#46d39a; --off:#5a636d;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; }
+  body {
+    background:var(--bg); color:var(--text); min-height:100dvh;
+    font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:14px 14px calc(14px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:14px;
+  }
+  header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  header h1 { font-size:16px; font-weight:700; margin:0; letter-spacing:-.2px; }
+  header .meta { font-size:12px; color:var(--muted); text-align:right; }
+
+  /* live feed */
+  #feedwrap { position:relative; background:#000; border:1px solid var(--line); border-radius:12px;
+    aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  #feed { width:100%; height:100%; object-fit:contain; display:none; }
+  #waiting { position:absolute; color:var(--muted); font-size:13px; padding:0 16px; text-align:center; }
+
+  /* primary start/stop */
+  #power { width:100%; border:0; border-radius:12px; padding:16px; font:inherit; font-size:17px;
+    font-weight:700; cursor:pointer; color:#001022; background:var(--on); transition:background .15s; }
+  #power.stopped { background:var(--alert); color:#160707; }
+  #power .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:currentColor;
+    margin-right:8px; vertical-align:middle; }
+
+  section h2 { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+    font-weight:700; margin:0 0 8px; }
+
+  /* A/B mode segmented control */
+  #modeseg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  #modeseg button { flex:1; font:inherit; font-size:14px; font-weight:700; padding:12px 0; border:0;
+    background:var(--panel); color:var(--muted); cursor:pointer; }
+  #modeseg button.active { background:var(--user); color:#001022; }
+  #modeseg button.active.tk { background:var(--on); }
+  #modeseg button:disabled { opacity:.6; }
+  #mode-note { font-size:12px; color:var(--muted); margin-top:7px; }
+
+  /* consent card */
+  #consent { display:none; background:#2b2413; border:1px solid #6b5a1e; border-radius:12px; padding:12px 14px; }
+  #consent.show { display:block; }
+  #consent .t { font-size:13px; font-weight:700; color:#e8c268; margin-bottom:5px; }
+  #consent .b { font-size:14px; margin-bottom:10px; }
+  #consent .row { display:flex; gap:8px; }
+  #consent button { flex:1; border:0; border-radius:9px; padding:11px 0; font:inherit; font-weight:700; cursor:pointer; }
+  #consent .yes { background:var(--on); color:#001022; }
+  #consent .no { background:var(--panel); color:var(--text); border:1px solid var(--line); }
+
+  /* guide controls */
+  #done { width:100%; border:0; border-radius:12px; padding:15px; font:inherit; font-size:16px;
+    font-weight:800; cursor:pointer; background:var(--assistant); color:#001022; }
+  #done:disabled { background:var(--panel); color:var(--muted); }
+  .guiderow { display:flex; gap:8px; margin-top:8px; }
+  .guiderow button { flex:1; border:1px solid var(--line); background:var(--panel); color:var(--text);
+    font:inherit; font-size:14px; font-weight:600; padding:11px 0; border-radius:10px; cursor:pointer; }
+
+  /* activity log */
+  #log { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:8px 10px;
+    height:30vh; min-height:150px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+  .row { display:flex; gap:8px; align-items:baseline; font-size:14px; }
+  .row .t { color:#5c6772; font-variant-numeric:tabular-nums; font-size:11px; flex:0 0 auto; }
+  .row .tag { font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; flex:0 0 auto; }
+  .row.user .tag{color:var(--user)} .row.assistant .tag{color:var(--assistant)}
+  .row.learn .tag{color:var(--assistant)} .row.status .tag{color:#6b7682}
+  .row.hud .tag{color:#9aa6b2}
+  .row .msg { min-width:0; word-break:break-word; }
+  .row.status .msg, .row.hud .msg { color:var(--muted); }
+  #log .empty { color:#4b545d; text-align:center; padding:24px 0; font-size:13px; }
+
+  /* say bar */
+  #bar { display:flex; gap:8px; }
+  #say { flex:1; min-width:0; background:var(--panel); border:1px solid var(--line); color:var(--text);
+    font:inherit; padding:12px 14px; border-radius:10px; }
+  #say:focus { outline:none; border-color:var(--user); }
+  #send { border:0; background:var(--user); color:#001022; font:inherit; font-weight:700;
+    padding:12px 18px; border-radius:10px; cursor:pointer; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Appliance Guide</h1>
+    <div class="meta"><span id="m-mode">—</span> · <span id="m-cam">camera —</span></div>
+  </header>
+
+  <div id="feedwrap">
+    <span id="waiting">waiting for glasses video…</span>
+    <img id="feed" alt="glasses live view" />
+  </div>
+
+  <button id="power"><span class="dot"></span><span id="power-label">Running — tap to stop</span></button>
+
+  <section>
+    <h2>Mode</h2>
+    <div id="modeseg">
+      <button data-mode="baseline">Baseline</button>
+      <button data-mode="toolkit" class="tk">Toolkit</button>
+    </div>
+    <div id="mode-note">Baseline: raw model output, default delivery.</div>
+  </section>
+
+  <div id="consent">
+    <div class="t" id="consent-title">Permission request</div>
+    <div class="b" id="consent-text"></div>
+    <div class="row">
+      <button class="yes" id="consent-yes">Yes, that's okay</button>
+      <button class="no" id="consent-no">Not now</button>
+    </div>
+  </div>
+
+  <section>
+    <h2>Guide</h2>
+    <button id="done">✓ Done — next step</button>
+    <div class="guiderow">
+      <button id="repeat">↻ Repeat</button>
+      <button id="stoptask">■ Stop task</button>
+    </div>
+  </section>
+
+  <section style="flex:1; display:flex; flex-direction:column;">
+    <h2>Activity log</h2>
+    <div id="log"><div class="empty">waiting for activity…</div></div>
+  </section>
+
+  <div id="bar">
+    <input id="say" type="text" placeholder="Type a message to the guide…" autocomplete="off" />
+    <button id="send">Send</button>
+  </div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const B = '/webview';
+
+  // ---- live feed (MJPEG with polling fallback) ----
+  const feed = $('feed'), waiting = $('waiting');
+  feed.onload = () => { feed.style.display = 'block'; waiting.style.display = 'none'; };
+  let polling = false;
+  feed.onerror = () => {
+    if (polling) return; polling = true;
+    setInterval(() => { feed.src = B + '/frame.jpg?t=' + Date.now(); }, 250);
+  };
+  feed.src = B + '/stream.mjpg';
+
+  // ---- activity log (SSE) ----
+  const log = $('log');
+  const LABELS = { user:'You', assistant:'Guide', status:'System', hud:'HUD', learn:'Learned' };
+  function pad(n){ return n<10 ? '0'+n : ''+n; }
+  function clock(ts){ const d=new Date(ts||Date.now()); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
+  function addLog(e) {
+    const empty = log.querySelector('.empty'); if (empty) empty.remove();
+    const row = document.createElement('div'); row.className = 'row ' + e.type;
+    const t = document.createElement('span'); t.className='t'; t.textContent = clock(e.ts);
+    const tag = document.createElement('span'); tag.className='tag'; tag.textContent = LABELS[e.type] || e.type;
+    const msg = document.createElement('span'); msg.className='msg'; msg.textContent = e.text;
+    row.append(t, tag, msg); log.append(row);
+    while (log.children.length > 120) log.removeChild(log.firstChild);
+    log.scrollTop = log.scrollHeight;
+  }
+  const es = new EventSource(B + '/events');
+  es.onmessage = (ev) => { try { addLog(JSON.parse(ev.data)); } catch {} };
+
+  // ---- start / stop (POST /active) ----
+  const power = $('power'), powerLabel = $('power-label');
+  let active = false, lastActiveAt = 0;
+  function renderPower() {
+    power.classList.toggle('stopped', !active);
+    powerLabel.textContent = active ? 'Running — tap to stop' : 'Stopped — tap to start';
+  }
+  power.onclick = () => {
+    active = !active; lastActiveAt = Date.now(); renderPower();
+    fetch(B + '/active', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ active }) });
+  };
+  renderPower();
+
+  // ---- mode toggle (POST /mode) ----
+  const modeButtons = Array.from($('modeseg').querySelectorAll('button'));
+  let currentMode = 'baseline', lastModeAt = 0;
+  function renderMode(st) {
+    currentMode = st.mode;
+    modeButtons.forEach((b) => {
+      b.classList.toggle('active', b.dataset.mode === st.mode);
+      b.disabled = !!st.switching;
+    });
+    $('m-mode').textContent = st.mode + (st.granted ? ' · profile' : '');
+    $('mode-note').textContent = st.mode === 'toolkit'
+      ? (st.granted ? 'Profile: rate ' + st.rate + '× · ' + st.deliveryMode + (st.captionsMirror ? ' · captions' : '') : 'Waiting for profile consent…')
+      : 'Baseline: raw model output, default delivery.';
+  }
+  modeButtons.forEach((b) => {
+    b.onclick = () => {
+      if (b.dataset.mode === currentMode) return;
+      lastModeAt = Date.now();
+      fetch(B + '/mode', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ mode: b.dataset.mode }) });
+    };
+  });
+
+  // ---- consent card (POST /consent) ----
+  let consentId = null;
+  function renderConsent(cardState) {
+    const el = $('consent');
+    if (!cardState) { el.classList.remove('show'); consentId = null; return; }
+    if (consentId === cardState.id && el.classList.contains('show')) return;
+    consentId = cardState.id;
+    $('consent-title').textContent = cardState.kind === 'grant' ? 'Permission request' : 'Suggestion from your guide';
+    $('consent-text').textContent = cardState.body;
+    el.classList.add('show');
+  }
+  function answer(response) {
+    fetch(B + '/consent', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ response }) });
+    $('consent').classList.remove('show');
+  }
+  $('consent-yes').onclick = () => answer('accept');
+  $('consent-no').onclick = () => answer('declineOnce');
+
+  // ---- guide controls ----
+  function sendText(t) {
+    fetch(B + '/say', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text: t }) });
+  }
+  $('done').onclick = () => sendText('done');
+  $('repeat').onclick = () => sendText('repeat');
+  $('stoptask').onclick = () => sendText('stop');
+
+  // ---- status polling ----
+  async function poll() {
+    try {
+      const s = await (await fetch(B + '/status')).json();
+      $('m-cam').textContent = (s.frames > 0) ? 'camera: live' : 'camera: no video';
+      if (typeof s.active === 'boolean' && Date.now() - lastActiveAt > 1500) { active = s.active; renderPower(); }
+      const st = s.state || {};
+      if (Date.now() - lastModeAt > 1500) renderMode(st);
+      renderConsent(st.consentCard);
+      $('done').disabled = !(st.task && st.task.active && st.deliveryMode === 'stepwise');
+    } catch {}
+  }
+  poll(); setInterval(poll, 1500);
+
+  // ---- say ----
+  const say = $('say');
+  function send() { const t = say.value.trim(); if (!t) return; say.value=''; sendText(t); }
+  $('send').onclick = send;
+  say.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+})();
+</script>
+</body>
+</html>

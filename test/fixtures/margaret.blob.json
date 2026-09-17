@@ -1,0 +1,33 @@
+{
+  "kind": "aa-profile-blob",
+  "v": 1,
+  "exportedAt": 1756700000000,
+  "abilityModel": {
+    "schemaVersion": 1,
+    "supportAreas": ["hearing", "cognitive"],
+    "freeText": "",
+    "language": "standard",
+    "readingLevel": null,
+    "confidence": null,
+    "needs": [
+      { "dimension": "readAloudRate", "value": 0.8, "strength": "preference", "source": "setup-script" },
+      { "dimension": "pacing", "value": "stepwise", "strength": "preference", "source": "setup-script" },
+      { "dimension": "simplify", "value": true, "strength": "preference", "source": "onboarding-derived" },
+      { "dimension": "captions", "value": true, "strength": "preference", "source": "onboarding-derived" }
+    ]
+  },
+  "profile": {
+    "supportAreas": ["hearing", "cognitive"],
+    "freeText": "",
+    "fields": {
+      "needs": [
+        { "dimension": "readAloudRate", "value": 0.8, "strength": "preference", "source": "setup-script" },
+        { "dimension": "pacing", "value": "stepwise", "strength": "preference", "source": "setup-script" },
+        { "dimension": "simplify", "value": true, "strength": "preference", "source": "onboarding-derived" },
+        { "dimension": "captions", "value": true, "strength": "preference", "source": "onboarding-derived" }
+      ]
+    },
+    "metaPreferences": { "language": "standard" },
+    "updatedAt": 1756700000000
+  }
+}
