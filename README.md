@@ -49,38 +49,54 @@ Wear headphones if you can — the mic can hear the guide's own voice.
 
 ## 2. Run on the glasses (Mentra)
 
-You need Mentra glasses paired to the MentraOS phone app, a Mentra developer
-console account, and a tunnel such as `ngrok`. The glasses stream their camera
-straight to this laptop over Wi-Fi; the app tells them to.
+You need Mentra glasses paired to the MentraOS phone app and a Mentra developer
+console account. The app runs on the server behind
+**https://a11y.attunemitserver.dev** (GCP VM `attune-server`) — no tunnel, and
+the glasses don't need to share a network with anything: they stream their
+camera to the server over the internet; the app tells them to.
 
-1. **Console app.** Create the app with your package name, the permissions in
-   `app_config.json` (microphone, camera), and a public URL to this laptop's
-   port 3000 — run `ngrok http 3000` and paste the URL it prints.
-   The phone panel is that URL followed by `/webview`.
-2. **`.env`.**
+1. **Console app.** The app's public URL in the Mentra console is
+   `https://a11y.attunemitserver.dev`, with the permissions in
+   `app_config.json` (microphone, camera). The phone panel is
+   https://a11y.attunemitserver.dev/webview.
+2. **Deploy.**
+
+   ```bash
+   bun run deploy        # uploads this repo + the sibling toolkit, restarts the service
+   ```
+
+   On the server the app lives in `~/a11y-toolkit/wearable-extension` (toolkit
+   beside it, as here) and runs as the systemd service `wearable-a11y`; nginx
+   forwards the URL to it. Deploying never touches the server's `.env` or
+   `data/`. The server `.env` differs from `.env.example` in:
 
    | Key | Value |
    |---|---|
    | `PACKAGE_NAME`, `MENTRAOS_API_KEY` | from the console app |
-   | `RTMP_HOST` | this laptop's Wi-Fi address (`ipconfig getifaddr en0` on a Mac) |
-   | `PORT`, `RTMP_PORT` | leave the defaults (3000, 1935) |
+   | `RTMP_HOST` | the server's public IP — the glasses publish RTMP straight to it |
+   | `PORT`, `RTMP_PORT`, `DEMO_PORT` | 3700, 1936 (open in the GCP firewall), 3701 |
 
-3. **Network.** Glasses and laptop on the **same Wi-Fi**, and it must allow
-   devices to talk to each other — guest and campus networks often don't.
-   A phone hotspot with both on it is the safe choice. If the Mac firewall
-   is on, allow incoming connections for bun.
-4. **Glasses on Wi-Fi.** The HUD says *Connect glasses to WiFi* otherwise.
-5. **Run.**
-
-   ```bash
-   bun run reset:take
-   bun run start
-   ```
-
+3. **Glasses on Wi-Fi.** Any Wi-Fi with internet. The HUD says
+   *Connect glasses to WiFi* otherwise.
+4. **Run.** The service is always up; Gemini stays off until you press Start.
    Open the app on the glasses and press **Start** on the phone panel. That one
    switch turns on Gemini and the camera. The HUD shows
-   *Ready — Appliance Guide listening*, and http://localhost:3001 on the laptop
-   shows what the glasses see. The terminal logs every camera status change.
+   *Ready — Appliance Guide listening*.
+
+   ```bash
+   gcloud compute ssh attune-server --zone=us-east1-b     # then, on the server:
+   cd ~/a11y-toolkit/wearable-extension && bun run reset:take   # between Toolkit takes
+   journalctl -u wearable-a11y -f                         # logs, every camera status change
+   sudo systemctl stop wearable-a11y                      # off for good (■ Stop only restarts it)
+   ```
+
+   To see what the glasses see, tunnel the demo page (it isn't public):
+   `gcloud compute ssh attune-server --zone=us-east1-b -- -L 3701:localhost:3701`,
+   then open http://localhost:3701.
+
+To run it from a laptop instead, set `RTMP_HOST` to the laptop's Wi-Fi address,
+put glasses and laptop on the same network (a phone hotspot is the safe
+choice), `bun run start`, and point the console URL at a tunnel to port 3000.
 
 This path has not been run on hardware from this repo yet — the first run is
 a bring-up session (`docs/CHECKING.md` §6). The stream, the network, and
