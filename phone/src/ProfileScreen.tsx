@@ -87,16 +87,6 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
 
           {view ? (
             <>
-              <Card title="What the guide will do">
-                {(view.effect ?? ['(the server needs updating to show this)']).map((line) => (
-                  <Text key={line} style={[s.effect, { color: c.text }]}>• {line}</Text>
-                ))}
-                <Text style={[s.effect, { color: c.textMuted }]}>• Speaks to you as an adult — always</Text>
-                <Text style={[s.help, { color: view.profileOn ? c.ok : c.textMuted }]}>
-                  {view.profileOn ? 'In use now.' : view.mode === 'toolkit' ? 'Used when the guide starts in Toolkit mode.' : 'Used in Toolkit mode. Baseline ignores the profile.'}
-                </Text>
-              </Card>
-
               <Card title="Abilities">
                 {view.needs.map((n, i) => (
                   <View key={n.key} style={[s.need, i > 0 ? { borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
@@ -109,6 +99,16 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
                   </View>
                 ))}
                 {view.needs.length === 0 ? <Text style={[s.help, { color: c.textMuted }]}>Nothing set — the guide uses its defaults.</Text> : null}
+              </Card>
+
+              <Card title="What the guide will do">
+                {(view.effect ?? ['(the server needs updating to show this)']).map((line) => (
+                  <Text key={line} style={[s.effect, { color: c.text }]}>• {line}</Text>
+                ))}
+                <Text style={[s.effect, { color: c.textMuted }]}>• Speaks to you as an adult — always</Text>
+                <Text style={[s.help, { color: view.profileOn ? c.ok : c.textMuted }]}>
+                  {view.profileOn ? 'In use now.' : view.mode === 'toolkit' ? 'Used when the guide starts in Toolkit mode.' : 'Used in Toolkit mode. Baseline ignores the profile.'}
+                </Text>
               </Card>
 
               {view.available.length ? (
