@@ -50,7 +50,15 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
     if (props.open) void run('');
   }, [props.open, run]);
 
-  const save = (key: string, value: unknown): void => void run('', { key, value });
+  // A change shows on its own row at once; the server's answer (the same
+  // rows, plus the updated summary) lands afterwards without dimming anything.
+  const save = (key: string, value: unknown): void => {
+    setView((v) => (v ? { ...v, needs: v.needs.map((n) => (n.key === key ? { ...n, value } : n)) } : v));
+    setProblem('');
+    void call('', { key, value })
+      .then(setView)
+      .catch((e) => setProblem(e instanceof Error ? e.message : String(e)));
+  };
   const remove = (n: ProfileNeedView): void =>
     Alert.alert(`Remove “${n.label}”?`, 'The guide goes back to its default for this.', [
       { text: 'Cancel', style: 'cancel' },
@@ -94,9 +102,9 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
                   <View key={n.key} style={[s.need, i > 0 ? { borderTopColor: c.border, borderTopWidth: StyleSheet.hairlineWidth } : null]}>
                     <View style={s.needTop}>
                       <Text style={[s.needLabel, { color: c.text }]}>{n.label}</Text>
-                      <Button label="Remove" kind="quiet" size="small" onPress={() => remove(n)} disabled={busy} />
+                      <Button label="Remove" kind="quiet" size="small" onPress={() => remove(n)} />
                     </View>
-                    <NeedControl need={n} disabled={busy} onChange={(v) => save(n.key, v)} />
+                    <NeedControl need={n} disabled={false} onChange={(v) => save(n.key, v)} />
                     <Text style={[s.help, { color: c.textMuted }]}>{n.help}</Text>
                   </View>
                 ))}
@@ -106,7 +114,7 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
               {view.available.length ? (
                 <Card title="Add">
                   {view.available.map((a) => (
-                    <Button key={a.key} label={a.label} kind="secondary" onPress={() => save(a.key, a.default)} disabled={busy} hint={a.help} />
+                    <Button key={a.key} label={a.label} kind="secondary" onPress={() => save(a.key, a.default)} hint={a.help} />
                   ))}
                   <Text style={[s.help, { color: c.textMuted }]}>Adding starts at the usual setting.</Text>
                 </Card>
