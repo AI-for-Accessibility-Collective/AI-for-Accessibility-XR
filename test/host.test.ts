@@ -62,8 +62,10 @@ describe('readModel', () => {
     const render = renderXRAudioSettings(model);
     expect(render.language).toMatchObject({ readingLevel: 'grade 6', language: 'plain' });
     const block = profilePromptBlock(model, render);
-    expect(block).toContain('grade 6 reading level');
-    expect(block).toContain('plain language');
+    // …but neither is a prompt directive any more: reading-level formulas are
+    // for written text, and 'plain' duplicates simplify (prompt-directives.ts).
+    expect(block).not.toContain('reading level');
+    expect(block).not.toContain('Use plain language throughout');
     // …and never the free text.
     expect(block).not.toContain('Ruth');
   });

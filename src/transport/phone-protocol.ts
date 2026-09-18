@@ -80,6 +80,9 @@ export interface ProfileNeedView {
   unit?: string;
   strength?: string;
   source?: string;
+  // What this need switches on, in plain words (the lines that vanish from
+  // ProfileView.effect when it is removed).
+  effect?: string[];
 }
 
 export interface ProfileAvailableView {

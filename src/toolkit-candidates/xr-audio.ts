@@ -30,6 +30,12 @@ export interface XRAudioSettings {
   };
   language: {
     simplify: boolean;
+    // How clearly each step is phrased: 'clear' = action first, one new
+    // thing per sentence, questions instead of conditions; 'clearest' also
+    // says which step this is and re-uses the same names.
+    clarity: 'standard' | 'clear' | 'clearest';
+    // Sentence cap the prompt asks for, or null for no cap.
+    sentenceWords: number | null;
     readingLevel: string | number | null;
     language: string;
   };
@@ -57,13 +63,19 @@ export function renderXRAudioSettings(model: AbilityModel | null): XRAudioSettin
   const rate = Number.isFinite(xr.speech.rate) ? xr.speech.rate : 1.0;
   const simplify = xr.simplifyLanguage;
 
-  // What audio adds. These three dimensions are not in the toolkit's
-  // vocabulary yet (see README.md in this folder).
+  // What audio adds. These four dimensions (voicePitch, pacing, spokenDetail,
+  // clarity) are not in the toolkit's vocabulary yet (see README.md here).
   const pitchPreference = need(model, 'voicePitch')?.value === 'low' ? 'low' : 'standard';
   const stepwise = need(model, 'pacing')?.value === 'stepwise';
   const detailNeed = need(model, 'spokenDetail');
   // gistFirst ← spokenDetail === 'gist'; with no spokenDetail need, simplify.
   const gistFirst = detailNeed != null ? detailNeed.value === 'gist' : simplify;
+
+  const clarityNeed = need(model, 'clarity')?.value;
+  const clarity = clarityNeed === 'clear' || clarityNeed === 'clearest' ? clarityNeed : 'standard';
+  // Kemper: clause count and left-branching predict trouble better than
+  // length, so the cap steps down with clarity; stepwise alone keeps ~18.
+  const sentenceWords = clarity === 'clearest' ? 8 : clarity === 'clear' ? 12 : stepwise ? 18 : null;
 
   const hearing = Array.isArray(model?.supportAreas) && model.supportAreas.includes('hearing');
 
@@ -78,11 +90,13 @@ export function renderXRAudioSettings(model: AbilityModel | null): XRAudioSettin
     delivery: {
       mode: stepwise ? 'stepwise' : 'continuous',
       confirmToAdvance: stepwise,
-      maxWordsPerUtterance: stepwise ? 18 : null,
+      maxWordsPerUtterance: stepwise ? sentenceWords : null,
       gistFirst,
     },
     language: {
       simplify,
+      clarity,
+      sentenceWords,
       readingLevel: model?.readingLevel ?? null,
       language: model?.language || 'standard',
     },

@@ -69,6 +69,18 @@ export const NEED_SPECS: readonly NeedSpec[] = [
     default: false,
   },
   {
+    key: 'clarity',
+    label: 'Clear steps',
+    help: 'How each step is phrased. Clear: the action first, one new thing per sentence, a question instead of "if". Extra clear: also says which step you are on and keeps the same names for things.',
+    kind: 'choice',
+    options: [
+      { value: 'standard', label: 'Standard' },
+      { value: 'clear', label: 'Clear' },
+      { value: 'clearest', label: 'Extra clear' },
+    ],
+    default: 'standard',
+  },
+  {
     key: 'spokenDetail',
     label: 'Detail',
     help: 'Gist first: the one-sentence point, then details only if you ask.',

@@ -135,7 +135,7 @@ describe('resetProfile (host.ts)', () => {
 
 describe('needs catalog', () => {
   test('every dimension the XR audio surface reads has a control', () => {
-    expect(NEED_SPECS.map((s) => s.key).sort()).toEqual(['captions', 'pacing', 'readAloudRate', 'simplify', 'spokenDetail', 'voicePitch']);
+    expect(NEED_SPECS.map((s) => s.key).sort()).toEqual(['captions', 'clarity', 'pacing', 'readAloudRate', 'simplify', 'spokenDetail', 'voicePitch']);
   });
   test('accepts the allowed values, snapping numbers to the step', () => {
     expect(checkNeedValue('pacing', 'stepwise')).toEqual({ ok: true, value: 'stepwise' });
@@ -165,10 +165,30 @@ describe('profile API (both web surfaces)', () => {
     expect(view.needs.map((n) => n.key)).toEqual(['pacing', 'readAloudRate', 'simplify', 'captions']);
     // The effect lines are the surface's answer for this profile, so an edit
     // shows what it changes: pacing off → the first line flips.
-    expect(view.effect).toEqual(['One step at a time, waits for "done"', 'Speaks at 0.8× speed', 'Plain everyday words', 'Gist first, details on request', 'Captions on the display']);
+    expect(view.effect).toEqual([
+      'One step at a time, then waits for you',
+      'Speaks at 0.8× speed',
+      'Short sentences (about 18 words)',
+      'Plain everyday words, never jargon',
+      'The same word for the same thing',
+      'Gist first, details on request',
+      'Captions on the display',
+    ]);
+    // …and each need shows the lines it alone is responsible for.
+    expect(needOf(view, 'simplify')?.effect).toEqual(['Plain everyday words, never jargon', 'The same word for the same thing', 'Gist first, details on request']);
+    expect(needOf(view, 'captions')?.effect).toEqual(['Captions on the display']);
     const after = (await api.set({ key: 'pacing', value: 'continuous' })).body as ProfileView;
     expect(after.effect[0]).toBe('Whole answer at once');
-    expect(view.available.map((n) => n.key)).toEqual(['spokenDetail', 'voicePitch']);
+    // Clear steps adds its lines, and they are attributed to it.
+    const clear = (await api.set({ key: 'clarity', value: 'clearest' })).body as ProfileView;
+    expect(needOf(clear, 'clarity')?.effect).toEqual([
+      'Short sentences (about 8 words)',
+      'Says what to do first, then where',
+      'One new thing per sentence',
+      'Asks a question instead of "if…"',
+      'Says which step you are on',
+    ]);
+    expect(view.available.map((n) => n.key)).toEqual(['clarity', 'spokenDetail', 'voicePitch']);
     expect(needOf(view, 'pacing')).toMatchObject({
       kind: 'choice',
       value: 'stepwise',
@@ -214,10 +234,10 @@ describe('profile API (both web surfaces)', () => {
     const api = createProfileApi({ toolkit: () => tk, sessionState: () => idleState() });
     let view = (await api.set({ key: 'spokenDetail', value: 'gist' })).body as ProfileView;
     expect(needOf(view, 'spokenDetail')).toMatchObject({ value: 'gist' });
-    expect(view.available.map((n) => n.key)).toEqual(['voicePitch']);
+    expect(view.available.map((n) => n.key)).toEqual(['clarity', 'voicePitch']);
     view = (await api.set({ key: 'spokenDetail', value: null })).body as ProfileView;
     expect(needOf(view, 'spokenDetail')).toBeUndefined();
-    expect(view.available.map((n) => n.key)).toEqual(['spokenDetail', 'voicePitch']);
+    expect(view.available.map((n) => n.key)).toEqual(['clarity', 'spokenDetail', 'voicePitch']);
   });
 
   test('POST: invalid key / value → 400 with a reason, nothing written, session not told', async () => {

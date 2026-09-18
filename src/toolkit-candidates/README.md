@@ -21,15 +21,18 @@ a copy, not a rewrite (`test/toolkit-candidates.test.ts` enforces it).
 | File | What it is | How portable |
 |---|---|---|
 | `xr-audio.ts` | The XR audio surface. Takes speaking rate, simplify and captions from the toolkit's `renderXRSettings`, and adds what audio needs: one-step-at-a-time pacing, pauses, utterance size, gist-first, pitch, volume. | High — pure, same shape as `xr.js` |
-| `adapters/prompt-directives.ts` | Settings → the lines added to an LLM's prompt (one step at a time, plain words, short sentences, gist first, never talk down). | High — any app that speaks through a model |
+| `adapters/prompt-directives.ts` | Settings → the lines added to an LLM's prompt (one step at a time, action first, one new thing per sentence, plain words, short sentences, gist first, never talk down). Each line cites the aging / working-memory research behind it. | High — any app that speaks through a model |
 | `adapters/paced-delivery.ts` | Settings → speech in short chunks with pauses between. The caller supplies the voice. | High — no engine, no device |
 | `adapters/voice.ts` | Settings → one voice engine's options (ElevenLabs numbers; a Gemini style line). | Low — vendor glue, and it carries this demo's same-voice filming rule. May stay app-side for good. |
 
 ## What would go to the toolkit, in order
 
-1. **Three words for the needs vocabulary** — `pacing` (`continuous` |
+1. **Four words for the needs vocabulary** — `pacing` (`continuous` |
    `stepwise`), `voicePitch` (`low` | `standard`), `spokenDetail` (`gist` |
-   `standard` | `full`). The toolkit stores them today but no surface of its
+   `standard` | `full`), `clarity` (`standard` | `clear` | `clearest`: how
+   each step is phrased — action first, one new thing per sentence, a
+   question instead of a condition; the evidence is in
+   `docs/design/working-memory-fit.md`). The toolkit stores them today but no surface of its
    own reads them. This matters most: a shared word is what lets a second app
    read the same profile.
 2. **The surface** — `xr-audio.ts` as `toolkit/surfaces/xr-audio.js`, or folded

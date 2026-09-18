@@ -22,17 +22,37 @@ import margaret from '../../test/fixtures/margaret.blob.json';
 
 export type { ProfileView, ProfileNeedView, ProfileAvailableView } from './phone-protocol.ts';
 
-// The XR audio surface, read back as a short list a person can check.
+// The XR audio surface, read back as plain lines a person can check — one
+// line per behaviour the prompt directives or the delivery switch on, so the
+// panels can show exactly what a setting changes.
 export function effectLines(model: AbilityModel | null): string[] {
   const r = renderXRAudioSettings(model);
   const lines: string[] = [];
-  lines.push(r.delivery.mode === 'stepwise' ? 'One step at a time, waits for "done"' : 'Whole answer at once');
+  lines.push(r.delivery.mode === 'stepwise' ? 'One step at a time, then waits for you' : 'Whole answer at once');
   lines.push(r.speech.rate === 1 ? 'Normal speed' : `Speaks at ${r.speech.rate}× speed`);
-  if (r.language.simplify) lines.push('Plain everyday words');
+  if (r.language.sentenceWords != null) lines.push(`Short sentences (about ${r.language.sentenceWords} words)`);
+  if (r.language.clarity !== 'standard') {
+    lines.push('Says what to do first, then where');
+    lines.push('One new thing per sentence');
+    lines.push('Asks a question instead of "if…"');
+  }
+  if (r.language.clarity === 'clearest') lines.push('Says which step you are on');
+  if (r.language.simplify) {
+    lines.push('Plain everyday words, never jargon');
+    lines.push('The same word for the same thing');
+  }
   if (r.delivery.gistFirst) lines.push('Gist first, details on request');
   if (r.captionsMirror) lines.push('Captions on the display');
   if (r.speech.pitchPreference === 'low') lines.push('Lower-pitched voice');
   return lines;
+}
+
+// The lines one need is responsible for: what disappears when it is removed.
+function effectOf(model: AbilityModel | null, dimension: string): string[] {
+  if (!model) return [];
+  const without: AbilityModel = { ...model, needs: (model.needs ?? []).filter((n) => n.dimension !== dimension) };
+  const rest = new Set(effectLines(without));
+  return effectLines(model).filter((l) => !rest.has(l));
 }
 
 export interface ProfileApiDeps {
@@ -77,6 +97,7 @@ function toView(model: AbilityModel | null, state: SessionState): ProfileView {
       unit: spec.unit,
       strength: n.strength,
       source: n.source,
+      effect: effectOf(model, spec.key),
     });
   }
   // …then anything else the store holds, unhidden.

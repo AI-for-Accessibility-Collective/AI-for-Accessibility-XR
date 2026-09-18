@@ -30,8 +30,22 @@ describe('profilePromptBlock(margaret)', () => {
   test('plain-words directive present (simplify)', () => {
     expect(block).toMatch(/Plain everyday words/);
   });
-  test('calm-pacing directive present (rate < 1)', () => {
-    expect(block).toMatch(/Calm, unhurried/);
+  test('nothing in the block changes with speaking rate (Kemper & Harden 1999)', () => {
+    expect(block).not.toMatch(/unhurried|warm/);
+    const faster: AbilityModel = {
+      ...margaret,
+      needs: (margaret.needs ?? []).map((n) => (n.dimension === 'readAloudRate' ? { ...n, value: 1.0 } : n)),
+    };
+    expect(profilePromptBlock(faster, renderXRAudioSettings(faster))).toBe(block);
+  });
+  test('plain words also asks for one name per object (Lewis & Vasishth)', () => {
+    expect(block).toContain('one name per object');
+  });
+  test('clarity standard: no clear-steps directives', () => {
+    expect(block).not.toContain('Start with the verb');
+    expect(block).not.toContain('one new object');
+    expect(block).not.toContain("Never say 'if'");
+    expect(block).not.toContain('which step this is');
   });
   test('gist-first directive present', () => {
     expect(block).toMatch(/gist first/);
@@ -47,20 +61,58 @@ describe('profilePromptBlock(margaret)', () => {
     expect(block).toContain('capable adult');
     expect(block).toContain('no sing-song tone');
   });
-  test('elderspeak guard rides along with any single directive', () => {
+  test('elderspeak guard rides along with any single directive, and names the marked features', () => {
+    const captionsOnly: AbilityModel = {
+      ...(fixture.abilityModel as AbilityModel),
+      needs: [{ dimension: 'simplify', value: true, strength: 'preference', source: 'test' }],
+    };
+    const b = profilePromptBlock(captionsOnly, renderXRAudioSettings(captionsOnly));
+    expect(b).toContain('capable adult');
+    expect(b).toContain("no 'we' or 'let's'");
+    expect(b).toContain('no tag questions');
+    expect(b).not.toContain('ONE next action');
+  });
+  test('rate alone (no structural need) produces no block at all', () => {
     const rateOnly: AbilityModel = {
       ...(fixture.abilityModel as AbilityModel),
       needs: [{ dimension: 'readAloudRate', value: 0.8, strength: 'preference', source: 'test' }],
     };
-    const b = profilePromptBlock(rateOnly, renderXRAudioSettings(rateOnly));
-    expect(b).toContain('Calm, unhurried');
-    expect(b).toContain('capable adult');
-    expect(b).not.toContain('ONE next action');
+    expect(profilePromptBlock(rateOnly, renderXRAudioSettings(rateOnly))).toBe('');
   });
   test('freeText NEVER reaches the block', () => {
     expect(block).not.toContain(SECRET);
     expect(block).not.toContain('Ruth');
   });
+});
+
+// Clear steps: each level adds exactly its lines (docs/design/working-memory-fit.md).
+describe('clarity levels', () => {
+  const withClarity = (value: string): string => {
+    const m: AbilityModel = {
+      ...(fixture.abilityModel as AbilityModel),
+      needs: [...fixture.abilityModel.needs, { dimension: 'clarity', value, strength: 'preference', source: 'test' }] as AbilityModel['needs'],
+    };
+    return profilePromptBlock(m, renderXRAudioSettings(m));
+  };
+  test("'clear': action first, one new thing, ask instead of if, 12-word cap — not the step number", () => {
+    const b = withClarity('clear');
+    expect(b).toContain('Start with the verb');
+    expect(b).toContain('at most one new object or value per sentence');
+    expect(b).toContain("Never say 'if' or 'when'");
+    expect(b).toContain('under ~12 words, one clause each');
+    expect(b).not.toContain('which step this is');
+  });
+  test("'clearest': everything in clear, plus the step number and re-used names, 8-word cap", () => {
+    const b = withClarity('clearest');
+    expect(b).toContain('Start with the verb');
+    expect(b).toContain("Say which step this is before each action ('Step 3 of 5.')");
+    expect(b).toContain("'that dial'");
+    expect(b).toContain('under ~8 words');
+  });
+  test('an unknown value is standard', () => {
+    expect(withClarity('extreme')).toBe(block);
+  });
+  const block = profilePromptBlock(margaret, render);
 });
 
 describe('baseline (null model)', () => {
