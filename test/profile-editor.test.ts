@@ -179,7 +179,7 @@ describe('profile API (both web surfaces)', () => {
     expect(needOf(view, 'captions')?.effect).toEqual(['Captions on the display']);
     const after = (await api.set({ key: 'pacing', value: 'continuous' })).body as ProfileView;
     expect(after.effect[0]).toBe('Whole answer at once');
-    // Clear steps adds its lines, and they are attributed to it.
+    // Clarity adds its lines, and they are attributed to it.
     const clear = (await api.set({ key: 'clarity', value: 'clearest' })).body as ProfileView;
     expect(needOf(clear, 'clarity')?.effect).toEqual([
       'Short sentences (about 8 words)',
