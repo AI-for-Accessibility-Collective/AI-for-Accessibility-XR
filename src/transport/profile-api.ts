@@ -17,35 +17,10 @@ import { readModel, resetProfile, writeNeed, type GuideToolkit } from '../toolki
 import { checkNeedValue, NEED_SPECS } from '../toolkit/needs-catalog.ts';
 import type { ProfileView, ProfileNeedView, ProfileAvailableView } from './phone-protocol.ts';
 import type { SessionState } from '../runtime/session.ts';
-import { renderXRAudioSettings } from '../toolkit-candidates/xr-audio.ts';
+import { effectLines } from '../toolkit-candidates/effect.ts';
 import margaret from '../../test/fixtures/margaret.blob.json';
 
 export type { ProfileView, ProfileNeedView, ProfileAvailableView } from './phone-protocol.ts';
-
-// The XR audio surface, read back as plain lines a person can check — one
-// line per behaviour the prompt directives or the delivery switch on, so the
-// panels can show exactly what a setting changes.
-export function effectLines(model: AbilityModel | null): string[] {
-  const r = renderXRAudioSettings(model);
-  const lines: string[] = [];
-  lines.push(r.delivery.mode === 'stepwise' ? 'One step at a time, then waits for you' : 'Whole answer at once');
-  lines.push(r.speech.rate === 1 ? 'Normal speed' : `Speaks at ${r.speech.rate}× speed`);
-  if (r.language.sentenceWords != null) lines.push(`Short sentences (about ${r.language.sentenceWords} words)`);
-  if (r.language.clarity !== 'standard') {
-    lines.push('Says what to do first, then where');
-    lines.push('One new thing per sentence');
-    lines.push('Asks a question instead of "if…"');
-  }
-  if (r.language.clarity === 'clearest') lines.push('Says which step you are on');
-  if (r.language.simplify) {
-    lines.push('Plain everyday words, never jargon');
-    lines.push('The same word for the same thing');
-  }
-  if (r.delivery.gistFirst) lines.push('Gist first, details on request');
-  if (r.captionsMirror) lines.push('Captions on the display');
-  if (r.speech.pitchPreference === 'low') lines.push('Lower-pitched voice');
-  return lines;
-}
 
 // The lines one need is responsible for: what disappears when it is removed.
 function effectOf(model: AbilityModel | null, dimension: string): string[] {

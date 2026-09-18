@@ -18,12 +18,23 @@ a copy, not a rewrite (`test/toolkit-candidates.test.ts` enforces it).
 
 ## What is here
 
-| File | What it is | How portable |
-|---|---|---|
-| `xr-audio.ts` | The XR audio surface. Takes speaking rate, simplify and captions from the toolkit's `renderXRSettings`, and adds what audio needs: one-step-at-a-time pacing, pauses, utterance size, gist-first, pitch, volume. | High — pure, same shape as `xr.js` |
-| `adapters/prompt-directives.ts` | Settings → the lines added to an LLM's prompt (one step at a time, action first, one new thing per sentence, plain words, short sentences, gist first, never talk down). Each line cites the aging / working-memory research behind it. | High — any app that speaks through a model |
-| `adapters/paced-delivery.ts` | Settings → speech in short chunks with pauses between. The caller supplies the voice. | High — no engine, no device |
-| `adapters/voice.ts` | Settings → one voice engine's options (ElevenLabs numbers; a Gemini style line). | Low — vendor glue, and it carries this demo's same-voice filming rule. May stay app-side for good. |
+One adapter per adaptation, the toolkit's rule. Each carries the prompt lines
+and/or delivery behaviour for one ability, the research behind each line as a
+comment beside it, and its own plain-words description (what the panels show
+under "What the guide will do").
+
+| File | Ability | What it carries out | How portable |
+|---|---|---|---|
+| `xr-audio.ts` | all | The XR audio surface: takes rate, simplify and captions from the toolkit's `renderXRSettings`, adds pacing, clarity, gist-first, pitch, volume. Decides; does nothing. | High — pure, same shape as `xr.js` |
+| `adapters/one-step.ts` | `pacing` | One action, then wait (prompt); short chunks with pauses (delivery, via `paced-delivery.ts`) | High |
+| `adapters/action-first.ts` | `clarity` | Verb first, one new thing per sentence, a question instead of "if", the sentence cap; at the top level the step number (prompt) | High |
+| `adapters/plain-words.ts` | `simplify` | Everyday words, one name per object (prompt) | High |
+| `adapters/gist-first.ts` | `spokenDetail` | The gist first, one orienting sentence (prompt) | High |
+| `adapters/captions.ts` | `captions` | Names the mirror; the host's display does it | Trivial |
+| `adapters/voice.ts` | `readAloudRate`, `voicePitch`, hearing → volume | One voice engine's options (ElevenLabs numbers; a Gemini style line) | Low — vendor glue, and it carries this demo's same-voice filming rule |
+| `adapters/paced-delivery.ts` | — | Engine-agnostic helper: chunk text, speak with pauses, stop on cancel | High |
+| `adapters/prompt-directives.ts` | — | Joins the adapters' prompt lines into the one block, plus the always-on "speak as to a capable adult" guard (a rule, not an adaptation) | High |
+| `effect.ts` | — | Joins the adapters' descriptions | High |
 
 ## What would go to the toolkit, in order
 
