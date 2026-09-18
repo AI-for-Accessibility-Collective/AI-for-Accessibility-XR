@@ -97,13 +97,6 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
                       <Button label="Remove" kind="quiet" size="small" onPress={() => remove(n)} disabled={busy} />
                     </View>
                     <NeedControl need={n} disabled={busy} onChange={(v) => save(n.key, v)} />
-                    {n.effect?.length ? (
-                      <View style={s.effectList} accessible accessibilityLabel={`This setting: ${n.effect.join(', ')}`}>
-                        {n.effect.map((line) => (
-                          <Text key={line} style={[s.effectLine, { color: c.ok }]}>✓ {line}</Text>
-                        ))}
-                      </View>
-                    ) : null}
                     <Text style={[s.help, { color: c.textMuted }]}>{n.help}</Text>
                   </View>
                 ))}
@@ -178,8 +171,6 @@ const s = StyleSheet.create({
   effect: { fontSize: type.lead, lineHeight: 26 },
   help: { fontSize: type.caption + 1, lineHeight: 20 },
   need: { gap: space.sm, paddingTop: space.md },
-  effectList: { gap: 2 },
-  effectLine: { fontSize: type.body, lineHeight: 22 },
   needTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   needLabel: { fontSize: type.body, fontWeight: '700' },
   range: { flexDirection: 'row', alignItems: 'center', gap: space.md },
