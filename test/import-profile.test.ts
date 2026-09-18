@@ -42,7 +42,7 @@ describe('import into a fresh store', () => {
     const tk = await bootWithFixture(tempDir());
     const model = await tk.librarian.getAbilityModel();
     const byDim = new Map(model.needs.map((n) => [n.dimension, n]));
-    expect([...byDim.keys()].sort()).toEqual(['captions', 'pacing', 'readAloudRate', 'simplify']);
+    expect([...byDim.keys()].sort()).toEqual(['captions', 'clarity', 'pacing', 'readAloudRate', 'simplify']);
     expect(byDim.get('readAloudRate')).toMatchObject({ value: 0.8, source: 'setup-script' });
     expect(byDim.get('pacing')).toMatchObject({ value: 'stepwise', source: 'setup-script' });
     expect(byDim.get('simplify')).toMatchObject({ value: true, source: 'onboarding-derived' });
@@ -69,6 +69,6 @@ describe('import into a fresh store', () => {
     const again = await tk.librarian.importProfileBlob(fixture as never);
     expect(again.ok).toBe(true);
     const model = await tk.librarian.getAbilityModel();
-    expect(model.needs).toHaveLength(4);
+    expect(model.needs).toHaveLength(5);
   });
 });

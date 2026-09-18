@@ -37,7 +37,7 @@ describe('readModel', () => {
     const tk = await bootMargaret();
     const model = await readModel(tk);
     expect(model).not.toBeNull();
-    expect(model!.needs!.map((n) => n.dimension).sort()).toEqual(['captions', 'pacing', 'readAloudRate', 'simplify']);
+    expect(model!.needs!.map((n) => n.dimension).sort()).toEqual(['captions', 'clarity', 'pacing', 'readAloudRate', 'simplify']);
     expect(model!.supportAreas!.sort()).toEqual(['cognitive', 'hearing']);
     const render = renderXRAudioSettings(model);
     expect(render.speech.rate).toBe(0.8);

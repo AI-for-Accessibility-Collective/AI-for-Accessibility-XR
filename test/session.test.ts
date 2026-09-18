@@ -98,7 +98,7 @@ describe('choosing Toolkit mode', () => {
     await r.session.setMode('toolkit');
     const st = r.session.state();
     expect(st).toMatchObject({ mode: 'toolkit', profileOn: true, rate: 0.8, deliveryMode: 'stepwise', captionsMirror: true, switching: false });
-    expect(st.needs.map((n) => n.dimension).sort()).toEqual(['captions', 'pacing', 'readAloudRate', 'simplify']);
+    expect(st.needs.map((n) => n.dimension).sort()).toEqual(['captions', 'clarity', 'pacing', 'readAloudRate', 'simplify']);
     expect(r.spoken).toEqual([]);
     expect(r.events.filter((e) => e.type !== 'status')).toEqual([]);
   });

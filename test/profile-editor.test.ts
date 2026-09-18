@@ -61,16 +61,16 @@ describe('writeNeed (host.ts)', () => {
     // Provenance on the needs that were not edited survives.
     expect(byDim.get('captions')).toMatchObject({ value: true, source: 'onboarding-derived' });
     expect(byDim.get('readAloudRate')).toMatchObject({ value: 0.8, source: 'setup-script' });
-    expect(byDim.size).toBe(4);
+    expect(byDim.size).toBe(5);
   });
 
   test('adds a need the profile did not have, and clears one with null', async () => {
     const tk = await bootMargaret();
     await writeNeed(tk, 'spokenDetail', 'gist');
-    expect((await readModel(tk))!.needs!.map((n) => n.dimension).sort()).toEqual(['captions', 'pacing', 'readAloudRate', 'simplify', 'spokenDetail']);
+    expect((await readModel(tk))!.needs!.map((n) => n.dimension).sort()).toEqual(['captions', 'clarity', 'pacing', 'readAloudRate', 'simplify', 'spokenDetail']);
     await writeNeed(tk, 'spokenDetail', null);
     await writeNeed(tk, 'captions', null);
-    expect((await readModel(tk))!.needs!.map((n) => n.dimension).sort()).toEqual(['pacing', 'readAloudRate', 'simplify']);
+    expect((await readModel(tk))!.needs!.map((n) => n.dimension).sort()).toEqual(['clarity', 'pacing', 'readAloudRate', 'simplify']);
   });
 
   test('writes are serialized: many quick slider moves end on the last value', async () => {
@@ -162,13 +162,16 @@ describe('profile API (both web surfaces)', () => {
     const view = r.body as ProfileView;
     expect(view).toMatchObject({ mode: 'toolkit', profileOn: true });
     expect(view.supportAreas.sort()).toEqual(['cognitive', 'hearing']);
-    expect(view.needs.map((n) => n.key)).toEqual(['pacing', 'readAloudRate', 'simplify', 'captions']);
+    expect(view.needs.map((n) => n.key)).toEqual(['pacing', 'clarity', 'simplify', 'readAloudRate', 'captions']);
     // The effect lines are the surface's answer for this profile, so an edit
     // shows what it changes: pacing off → the first line flips.
     expect(view.effect).toEqual([
       'One step at a time, then waits for you',
       'Speaks at 0.8× speed',
-      'Short sentences (about 18 words)',
+      'Short sentences (about 12 words)',
+      'Says what to do first, then where',
+      'One new thing per sentence',
+      'Asks a question instead of "if…"',
       'Plain everyday words, never jargon',
       'The same word for the same thing',
       'Gist first, details on request',
@@ -176,6 +179,7 @@ describe('profile API (both web surfaces)', () => {
     ]);
     // …and each need shows the lines it alone is responsible for.
     expect(needOf(view, 'simplify')?.effect).toEqual(['Plain everyday words, never jargon', 'The same word for the same thing', 'Gist first, details on request']);
+    expect(needOf(view, 'clarity')?.effect).toEqual(['Short sentences (about 12 words)', 'Says what to do first, then where', 'One new thing per sentence', 'Asks a question instead of "if…"']);
     expect(needOf(view, 'captions')?.effect).toEqual(['Captions on the display']);
     const after = (await api.set({ key: 'pacing', value: 'continuous' })).body as ProfileView;
     expect(after.effect[0]).toBe('Whole answer at once');
@@ -188,7 +192,7 @@ describe('profile API (both web surfaces)', () => {
       'Asks a question instead of "if…"',
       'Says which step you are on',
     ]);
-    expect(view.available.map((n) => n.key)).toEqual(['clarity', 'spokenDetail', 'voicePitch']);
+    expect(view.available.map((n) => n.key)).toEqual(['spokenDetail', 'voicePitch']);
     expect(needOf(view, 'pacing')).toMatchObject({
       kind: 'choice',
       value: 'stepwise',
@@ -211,7 +215,7 @@ describe('profile API (both web surfaces)', () => {
     const api = createProfileApi({ toolkit: () => tk, sessionState: () => idleState('baseline', false) });
     const view = (await api.get()).body as ProfileView;
     expect(view).toMatchObject({ mode: 'baseline', profileOn: false });
-    expect(view.needs).toHaveLength(4); // still editable
+    expect(view.needs).toHaveLength(5); // still editable
   });
 
   test('POST: one change is saved, the session is told, the fresh profile comes back', async () => {
@@ -234,10 +238,10 @@ describe('profile API (both web surfaces)', () => {
     const api = createProfileApi({ toolkit: () => tk, sessionState: () => idleState() });
     let view = (await api.set({ key: 'spokenDetail', value: 'gist' })).body as ProfileView;
     expect(needOf(view, 'spokenDetail')).toMatchObject({ value: 'gist' });
-    expect(view.available.map((n) => n.key)).toEqual(['clarity', 'voicePitch']);
+    expect(view.available.map((n) => n.key)).toEqual(['voicePitch']);
     view = (await api.set({ key: 'spokenDetail', value: null })).body as ProfileView;
     expect(needOf(view, 'spokenDetail')).toBeUndefined();
-    expect(view.available.map((n) => n.key)).toEqual(['clarity', 'spokenDetail', 'voicePitch']);
+    expect(view.available.map((n) => n.key)).toEqual(['spokenDetail', 'voicePitch']);
   });
 
   test('POST: invalid key / value → 400 with a reason, nothing written, session not told', async () => {

@@ -23,8 +23,8 @@ export interface NeedSpec {
   max?: number;
   step?: number;
   unit?: string;
-  // What the surface assumes when the need is unset — the value an "Add"
-  // starts from, so adding a need never changes delivery by itself.
+  // The value an "Add" starts from: the surface's own default, except
+  // clarity, which starts at the recommended 'clear'.
   default: boolean | string | number;
 }
 
@@ -35,7 +35,7 @@ export const NEED_SPECS: readonly NeedSpec[] = [
   {
     key: 'pacing',
     label: 'Pacing',
-    help: 'One step at a time: the guide gives one action, then waits until you say it is done.',
+    help: 'One action, then it waits for you.',
     kind: 'choice',
     options: [
       { value: 'continuous', label: 'All at once' },
@@ -44,41 +44,23 @@ export const NEED_SPECS: readonly NeedSpec[] = [
     default: 'continuous',
   },
   {
-    key: 'readAloudRate',
-    label: 'Speaking rate',
-    help: 'How fast the guide talks. 1.0× is the normal speed; below it, the phrasing turns calm and unhurried too.',
-    kind: 'range',
-    min: 0.7,
-    max: 1.2,
-    step: 0.1,
-    unit: '×',
-    default: 1.0,
-  },
-  {
-    key: 'simplify',
-    label: 'Plain words',
-    help: 'Everyday words and short sentences — "soap", "big dial" — not manual terms, never jargon, never technical terms.',
-    kind: 'toggle',
-    default: false,
-  },
-  {
-    key: 'captions',
-    label: 'Captions',
-    help: 'What the guide says also appears as text on the display.',
-    kind: 'toggle',
-    default: false,
-  },
-  {
     key: 'clarity',
     label: 'Clarity',
-    help: 'How each step is phrased. Clear: the action first, one new thing per sentence, a question instead of "if". Extra clear: also says which step you are on and keeps the same names for things.',
+    help: 'Clear: the action first, one new thing per sentence, a question instead of "if". Extra clear: also says which step you are on.',
     kind: 'choice',
     options: [
       { value: 'standard', label: 'Standard' },
       { value: 'clear', label: 'Clear' },
       { value: 'clearest', label: 'Extra clear' },
     ],
-    default: 'standard',
+    default: 'clear',
+  },
+  {
+    key: 'simplify',
+    label: 'Plain words',
+    help: 'Everyday words — "soap", "big dial". Not manual terms, never jargon, never technical terms.',
+    kind: 'toggle',
+    default: false,
   },
   {
     key: 'spokenDetail',
@@ -93,9 +75,27 @@ export const NEED_SPECS: readonly NeedSpec[] = [
     default: 'standard',
   },
   {
+    key: 'readAloudRate',
+    label: 'Speaking rate',
+    help: 'How fast the guide talks. 1.0× is normal.',
+    kind: 'range',
+    min: 0.7,
+    max: 1.2,
+    step: 0.1,
+    unit: '×',
+    default: 1.0,
+  },
+  {
+    key: 'captions',
+    label: 'Captions',
+    help: 'The guide’s words also appear on the display.',
+    kind: 'toggle',
+    default: false,
+  },
+  {
     key: 'voicePitch',
     label: 'Voice pitch',
-    help: 'Prefer a lower-pitched voice. Film mode keeps one voice for both takes, so on film this changes nothing.',
+    help: 'A lower-pitched voice. (Film mode keeps one voice, so on film this changes nothing.)',
     kind: 'choice',
     options: [
       { value: 'standard', label: 'Standard' },

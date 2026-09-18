@@ -17,7 +17,7 @@
 // page only writes per-area default needs (captions, simplify, plus a stray
 // reduceMotion) and never parses free text — so readAloudRate/pacing cannot
 // exist without this step. --seed replaces the derived needs array with
-// Margaret's four, recording accurate sources, via public setProfileField.
+// Margaret's five, recording accurate sources, via public setProfileField.
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { validateProfileBlob } from '@ai4a11y/toolkit';
@@ -60,7 +60,7 @@ if (useFixture) {
       console.log(`[import-profile] seeded supportAreas: ${MARGARET_AREAS.join(', ')} (store had none — onboard at :4000/onboarding to set them for real)`);
     }
     await librarian.setProfileField('fields.needs', MARGARET_NEEDS);
-    console.log('[import-profile] --seed: replaced needs with Margaret\'s four (accurate sources; stray reduceMotion dropped)');
+    console.log('[import-profile] --seed: replaced needs with Margaret\'s five (accurate sources; stray reduceMotion dropped)');
   }
 
   blob = await librarian.exportProfileBlob();
@@ -80,11 +80,11 @@ const model = await importBlob(app.librarian, blob);
 printModel(model, `[import-profile] app store (${to}) uid=${uid} — after import:`);
 
 const dims = (model.needs || []).map((n) => n.dimension).sort();
-const expected = ['captions', 'pacing', 'readAloudRate', 'simplify'];
+const expected = ['captions', 'clarity', 'pacing', 'readAloudRate', 'simplify'];
 if (seed || useFixture) {
   const ok = expected.every((d) => dims.includes(d)) && !dims.includes('reduceMotion');
   console.log(ok
-    ? '\n[import-profile] ✓ exactly the four demo needs present, no stray reduceMotion'
+    ? '\n[import-profile] ✓ exactly the five demo needs present, no stray reduceMotion'
     : `\n[import-profile] ✗ unexpected needs set: [${dims.join(', ')}] (expected ${expected.join(', ')})`);
   if (!ok) process.exit(1);
 }

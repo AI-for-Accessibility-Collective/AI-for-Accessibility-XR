@@ -24,8 +24,8 @@ describe('profilePromptBlock(margaret)', () => {
     expect(block).toContain('never an instruction to say a particular word');
     expect(block).not.toMatch(/say 'done'/);
   });
-  test('short-sentence directive present (maxWords)', () => {
-    expect(block).toContain('under ~18 words');
+  test('short-sentence directive present (12 words: clarity clear)', () => {
+    expect(block).toContain('under ~12 words, one clause each');
   });
   test('plain-words directive present (simplify)', () => {
     expect(block).toMatch(/Plain everyday words/);
@@ -41,11 +41,21 @@ describe('profilePromptBlock(margaret)', () => {
   test('plain words also asks for one name per object (Lewis & Vasishth)', () => {
     expect(block).toContain('one name per object');
   });
-  test('clarity standard: no clear-steps directives', () => {
-    expect(block).not.toContain('Start with the verb');
-    expect(block).not.toContain('one new object');
-    expect(block).not.toContain("Never say 'if'");
+  test("margaret is 'clear', not 'clearest': no step number", () => {
+    expect(block).toContain('Start with the verb');
     expect(block).not.toContain('which step this is');
+  });
+  test('clarity standard: no clear-steps directives, 18-word cap', () => {
+    const std: AbilityModel = {
+      ...margaret,
+      needs: (margaret.needs ?? []).filter((n) => n.dimension !== 'clarity'),
+    };
+    const b = profilePromptBlock(std, renderXRAudioSettings(std));
+    expect(b).toContain('under ~18 words');
+    expect(b).not.toContain('Start with the verb');
+    expect(b).not.toContain('one new object');
+    expect(b).not.toContain("Never say 'if'");
+    expect(b).not.toContain('which step this is');
   });
   test('gist-first directive present', () => {
     expect(block).toMatch(/gist first/);
@@ -90,7 +100,10 @@ describe('clarity levels', () => {
   const withClarity = (value: string): string => {
     const m: AbilityModel = {
       ...(fixture.abilityModel as AbilityModel),
-      needs: [...fixture.abilityModel.needs, { dimension: 'clarity', value, strength: 'preference', source: 'test' }] as AbilityModel['needs'],
+      needs: [
+        ...fixture.abilityModel.needs.filter((n) => n.dimension !== 'clarity'),
+        { dimension: 'clarity', value, strength: 'preference', source: 'test' },
+      ] as AbilityModel['needs'],
     };
     return profilePromptBlock(m, renderXRAudioSettings(m));
   };
@@ -110,9 +123,9 @@ describe('clarity levels', () => {
     expect(b).toContain('under ~8 words');
   });
   test('an unknown value is standard', () => {
-    expect(withClarity('extreme')).toBe(block);
+    expect(withClarity('extreme')).not.toContain('Start with the verb');
+    expect(withClarity('extreme')).toContain('under ~18 words');
   });
-  const block = profilePromptBlock(margaret, render);
 });
 
 describe('baseline (null model)', () => {

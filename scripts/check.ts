@@ -243,14 +243,14 @@ await check("toolkit's own XR demo", () => {
   try {
     await check('profile import (fixture)', () => {
       const r = run('bun', ['scripts/import-profile.mjs', '--fixture', '--to', join(tmp, 'app')]);
-      return r.out.includes('exactly the four demo needs') ? pass('4 needs · accurate sources · no stray reduceMotion') : fail(lastLine(r.out));
+      return r.out.includes('exactly the five demo needs') ? pass('5 needs · accurate sources · no stray reduceMotion') : fail(lastLine(r.out));
     });
     await check('profile seed (onboarding helpers)', () => {
       const r = run('bun', [
         'scripts/import-profile.mjs', '--uid', 'margaret', '--seed',
         '--from', join(tmp, 'onboarding'), '--to', join(tmp, 'seeded'),
       ]);
-      return r.out.includes('exactly the four demo needs')
+      return r.out.includes('exactly the five demo needs')
         ? pass("cleaned repo's fileStore + createToolkitHost → blob → app store")
         : fail(lastLine(r.out));
     });
@@ -555,7 +555,7 @@ async function runRig(): Promise<void> {
       const inUse = await fetch(`${base}/status`).then(() => true, () => false);
       if (inUse) return fail(`port ${RIG_DEMO_PORT} is already serving something — stop it first`);
       const imported = run('bun', ['scripts/import-profile.mjs', '--fixture', '--to', dataDir]);
-      if (!imported.out.includes('exactly the four demo needs')) return fail(`fixture import failed: ${lastLine(imported.out)}`);
+      if (!imported.out.includes('exactly the five demo needs')) return fail(`fixture import failed: ${lastLine(imported.out)}`);
       child = spawn('bun', ['src/scripts/drive-core.ts'], {
         cwd: ROOT,
         env: {

@@ -35,7 +35,7 @@ export function printModel(model, header) {
   }
 }
 
-// Margaret's four needs (docs/DESIGN.md §3) with accurate provenance:
+// Margaret's five needs (docs/DESIGN.md §3) with accurate provenance:
 // captions/simplify are what the onboarding page's per-area defaults derive
 // from ticking hearing + cognitive; readAloudRate/pacing can NOT come from
 // the onboarding page today (it never parses free text) so they are seeded by
@@ -43,6 +43,7 @@ export function printModel(model, header) {
 export const MARGARET_NEEDS = [
   { dimension: 'readAloudRate', value: 0.8, strength: 'preference', source: 'setup-script' },
   { dimension: 'pacing', value: 'stepwise', strength: 'preference', source: 'setup-script' },
+  { dimension: 'clarity', value: 'clear', strength: 'preference', source: 'setup-script' },
   { dimension: 'simplify', value: true, strength: 'preference', source: 'onboarding-derived' },
   { dimension: 'captions', value: true, strength: 'preference', source: 'onboarding-derived' },
 ];
