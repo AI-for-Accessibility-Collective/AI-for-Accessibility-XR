@@ -116,7 +116,7 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
                   {view.available.map((a) => (
                     <Button key={a.key} label={a.label} kind="secondary" onPress={() => save(a.key, a.default)} hint={a.help} />
                   ))}
-                  <Text style={[s.help, { color: c.textMuted }]}>Adding starts at the usual setting.</Text>
+                  <Text style={[s.help, { color: c.textMuted }]}>Adding starts at the default, so nothing changes until you set it.</Text>
                 </Card>
               ) : null}
 

@@ -23,8 +23,8 @@ export interface NeedSpec {
   max?: number;
   step?: number;
   unit?: string;
-  // The value an "Add" starts from: the surface's own default, except
-  // clarity, which starts at the recommended 'clear'.
+  // What the surface assumes when the need is unset — the value an "Add"
+  // starts from, so adding a need never changes delivery by itself.
   default: boolean | string | number;
 }
 

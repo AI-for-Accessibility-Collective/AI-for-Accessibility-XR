@@ -45,10 +45,17 @@ describe('profilePromptBlock(margaret)', () => {
     expect(block).toContain('Start with the verb');
     expect(block).not.toContain('which step this is');
   });
-  test('clarity standard: no clear-steps directives, 18-word cap', () => {
-    const std: AbilityModel = {
+  test('clarity is clear by default: a profile that says nothing gets action-first steps', () => {
+    const unset: AbilityModel = {
       ...margaret,
       needs: (margaret.needs ?? []).filter((n) => n.dimension !== 'clarity'),
+    };
+    expect(profilePromptBlock(unset, renderXRAudioSettings(unset))).toBe(block);
+  });
+  test("clarity 'standard' opts out: no clear-steps directives, 18-word cap", () => {
+    const std: AbilityModel = {
+      ...margaret,
+      needs: (margaret.needs ?? []).map((n) => (n.dimension === 'clarity' ? { ...n, value: 'standard' } : n)),
     };
     const b = profilePromptBlock(std, renderXRAudioSettings(std));
     expect(b).toContain('under ~18 words');
@@ -82,12 +89,15 @@ describe('profilePromptBlock(margaret)', () => {
     expect(b).toContain('no tag questions');
     expect(b).not.toContain('ONE next action');
   });
-  test('rate alone (no structural need) produces no block at all', () => {
+  test('rate alone: only the default clear-steps lines, nothing tied to rate', () => {
     const rateOnly: AbilityModel = {
       ...(fixture.abilityModel as AbilityModel),
       needs: [{ dimension: 'readAloudRate', value: 0.8, strength: 'preference', source: 'test' }],
     };
-    expect(profilePromptBlock(rateOnly, renderXRAudioSettings(rateOnly))).toBe('');
+    const b = profilePromptBlock(rateOnly, renderXRAudioSettings(rateOnly));
+    expect(b).toContain('Start with the verb');
+    expect(b).not.toMatch(/unhurried|warm/);
+    expect(b).not.toContain('ONE next action');
   });
   test('freeText NEVER reaches the block', () => {
     expect(block).not.toContain(SECRET);
@@ -122,9 +132,9 @@ describe('clarity levels', () => {
     expect(b).toContain("'that dial'");
     expect(b).toContain('under ~8 words');
   });
-  test('an unknown value is standard', () => {
-    expect(withClarity('extreme')).not.toContain('Start with the verb');
-    expect(withClarity('extreme')).toContain('under ~18 words');
+  test('an unknown value is the default, clear', () => {
+    expect(withClarity('extreme')).toContain('Start with the verb');
+    expect(withClarity('extreme')).toContain('under ~12 words');
   });
 });
 

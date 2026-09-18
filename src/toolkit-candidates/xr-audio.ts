@@ -30,9 +30,9 @@ export interface XRAudioSettings {
   };
   language: {
     simplify: boolean;
-    // How clearly each step is phrased: 'clear' = action first, one new
-    // thing per sentence, questions instead of conditions; 'clearest' also
-    // says which step this is and re-uses the same names.
+    // How clearly each step is phrased: 'clear' (the default) = action
+    // first, one new thing per sentence, questions instead of conditions;
+    // 'clearest' also says which step this is; 'standard' opts out.
     clarity: 'standard' | 'clear' | 'clearest';
     // Sentence cap the prompt asks for, or null for no cap.
     sentenceWords: number | null;
@@ -71,8 +71,10 @@ export function renderXRAudioSettings(model: AbilityModel | null): XRAudioSettin
   // gistFirst ← spokenDetail === 'gist'; with no spokenDetail need, simplify.
   const gistFirst = detailNeed != null ? detailNeed.value === 'gist' : simplify;
 
+  // Clear is the default: a profile that says nothing gets action-first
+  // steps; 'standard' is an explicit opt-out.
   const clarityNeed = need(model, 'clarity')?.value;
-  const clarity = clarityNeed === 'clear' || clarityNeed === 'clearest' ? clarityNeed : 'standard';
+  const clarity = clarityNeed === 'standard' || clarityNeed === 'clearest' ? clarityNeed : 'clear';
   // Kemper: clause count and left-branching predict trouble better than
   // length, so the cap steps down with clarity; stepwise alone keeps ~18.
   const sentenceWords = clarity === 'clearest' ? 8 : clarity === 'clear' ? 12 : stepwise ? 18 : null;

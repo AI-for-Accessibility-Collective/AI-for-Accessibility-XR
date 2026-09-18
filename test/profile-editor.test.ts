@@ -179,19 +179,15 @@ describe('profile API (both web surfaces)', () => {
     ]);
     // …and each need shows the lines it alone is responsible for.
     expect(needOf(view, 'simplify')?.effect).toEqual(['Plain everyday words, never jargon', 'The same word for the same thing', 'Gist first, details on request']);
-    expect(needOf(view, 'clarity')?.effect).toEqual(['Short sentences (about 12 words)', 'Says what to do first, then where', 'One new thing per sentence', 'Asks a question instead of "if…"']);
+    // Clear IS the default, so setting it explicitly is responsible for nothing…
+    expect(needOf(view, 'clarity')?.effect).toEqual([]);
     expect(needOf(view, 'captions')?.effect).toEqual(['Captions on the display']);
     const after = (await api.set({ key: 'pacing', value: 'continuous' })).body as ProfileView;
     expect(after.effect[0]).toBe('Whole answer at once');
     // Clarity adds its lines, and they are attributed to it.
     const clear = (await api.set({ key: 'clarity', value: 'clearest' })).body as ProfileView;
-    expect(needOf(clear, 'clarity')?.effect).toEqual([
-      'Short sentences (about 8 words)',
-      'Says what to do first, then where',
-      'One new thing per sentence',
-      'Asks a question instead of "if…"',
-      'Says which step you are on',
-    ]);
+    // …while 'clearest' adds the step number and the tighter cap on top of it.
+    expect(needOf(clear, 'clarity')?.effect).toEqual(['Short sentences (about 8 words)', 'Says which step you are on']);
     expect(view.available.map((n) => n.key)).toEqual(['spokenDetail', 'voicePitch']);
     expect(needOf(view, 'pacing')).toMatchObject({
       kind: 'choice',
