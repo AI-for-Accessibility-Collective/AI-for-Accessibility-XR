@@ -70,7 +70,7 @@ export const NEED_SPECS: readonly NeedSpec[] = [
   },
   {
     key: 'clarity',
-    label: 'Clear steps',
+    label: 'Clarity',
     help: 'How each step is phrased. Clear: the action first, one new thing per sentence, a question instead of "if". Extra clear: also says which step you are on and keeps the same names for things.',
     kind: 'choice',
     options: [
