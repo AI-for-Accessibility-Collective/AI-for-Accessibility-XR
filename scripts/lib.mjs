@@ -2,11 +2,8 @@
 // under node or bun alike). App-side stores are built with the SAME toolkit
 // package the app links (`@ai4a11y/toolkit`) and its own node file store.
 
-import path from 'node:path';
 import { createToolkit, validateProfileBlob } from '@ai4a11y/toolkit';
 import { fileKV } from '@ai4a11y/toolkit/platforms/node/kv.js';
-
-export { fileKV };
 
 // Boot an app-side toolkit over `dir`, acting as `uid`.
 export async function bootAppStore(dir, uid) {
@@ -51,17 +48,6 @@ export const MARGARET_NEEDS = [
 ];
 
 export const MARGARET_AREAS = ['hearing', 'cognitive'];
-
-// Safety rail for reset-take: only ever delete a directory that looks like an
-// app data dir, never a home directory or filesystem root.
-export function assertDeletablePath(p) {
-  const r = path.resolve(p);
-  const home = process.env.HOME || '';
-  if (r === '/' || r === home || r.split(path.sep).filter(Boolean).length < 2) {
-    throw new Error(`refusing to delete suspicious path: ${r}`);
-  }
-  return r;
-}
 
 export function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);

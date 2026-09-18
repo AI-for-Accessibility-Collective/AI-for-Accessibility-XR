@@ -17,8 +17,8 @@ import { join, resolve } from 'node:path';
 import type { AbilityModel } from '@ai4a11y/toolkit';
 import { config } from '../src/config.ts';
 import { composePrompt } from '../src/skills/compose.ts';
-import { profilePromptBlock } from '../src/toolkit/prompt-block.ts';
-import { renderAudioSettings } from '../src/audio/render.ts';
+import { profilePromptBlock } from '../src/toolkit-candidates/adapters/prompt-directives.ts';
+import { renderXRAudioSettings } from '../src/toolkit-candidates/xr-audio.ts';
 import { readTextAloud, readVisibleText } from '../src/skills/builtin/read-text-aloud.ts';
 import { isCompletionReply, parseVerifyAnswer, verifyQuestion, VERIFY_MAX_OUTPUT_TOKENS } from '../src/skills/builtin/task-guide.ts';
 import { TURN_MAX_OUTPUT_TOKENS } from '../src/engine/request-engine.ts';
@@ -43,7 +43,7 @@ if (!MODELS.length) {
 // ---- the app's real prompts -------------------------------------------------------
 const task = washing as Task;
 const margaret = fixture.abilityModel as AbilityModel;
-const render = renderAudioSettings(margaret);
+const render = renderXRAudioSettings(margaret);
 const block = profilePromptBlock(margaret, render);
 const SI_BASELINE_TASK = composePrompt({ task, profileBlock: '' });
 const SI_TOOLKIT_TASK = composePrompt({ task, profileBlock: block });

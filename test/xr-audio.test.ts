@@ -1,15 +1,15 @@
-// render.test.ts — every field of renderAudioSettings vs the spec table
+// xr-audio.test.ts — every field of renderXRAudioSettings vs the spec table
 // (docs/DESIGN.md §7.1), for Margaret's model and for null (= baseline).
 
 import { describe, expect, test } from 'bun:test';
-import { renderAudioSettings } from '../src/audio/render.ts';
+import { renderXRAudioSettings } from '../src/toolkit-candidates/xr-audio.ts';
 import type { AbilityModel } from '@ai4a11y/toolkit';
 import fixture from './fixtures/margaret.blob.json';
 
 const margaret = fixture.abilityModel as AbilityModel;
 
-describe('renderAudioSettings(margaret)', () => {
-  const r = renderAudioSettings(margaret);
+describe('renderXRAudioSettings(margaret)', () => {
+  const r = renderXRAudioSettings(margaret);
 
   test('speech.rate ← needs readAloudRate', () => expect(r.speech.rate).toBe(0.8));
   test('speech.pitchPreference default standard (no voicePitch need)', () =>
@@ -28,8 +28,8 @@ describe('renderAudioSettings(margaret)', () => {
   test('captionsMirror ← needs captions', () => expect(r.captionsMirror).toBe(true));
 });
 
-describe('renderAudioSettings(null) — baseline defaults', () => {
-  const r = renderAudioSettings(null);
+describe('renderXRAudioSettings(null) — baseline defaults', () => {
+  const r = renderXRAudioSettings(null);
 
   test('rate 1.0', () => expect(r.speech.rate).toBe(1.0));
   test('pitch standard', () => expect(r.speech.pitchPreference).toBe('standard'));
@@ -46,12 +46,12 @@ describe('renderAudioSettings(null) — baseline defaults', () => {
 
 describe('individual derivations', () => {
   test('spokenDetail gist forces gistFirst even without simplify', () => {
-    const r = renderAudioSettings({ needs: [{ dimension: 'spokenDetail', value: 'gist', strength: 'preference' }] });
+    const r = renderXRAudioSettings({ needs: [{ dimension: 'spokenDetail', value: 'gist', strength: 'preference' }] });
     expect(r.delivery.gistFirst).toBe(true);
     expect(r.language.simplify).toBe(false);
   });
   test('spokenDetail full suppresses gistFirst even with simplify', () => {
-    const r = renderAudioSettings({
+    const r = renderXRAudioSettings({
       needs: [
         { dimension: 'spokenDetail', value: 'full', strength: 'preference' },
         { dimension: 'simplify', value: true, strength: 'preference' },
@@ -60,11 +60,11 @@ describe('individual derivations', () => {
     expect(r.delivery.gistFirst).toBe(false);
   });
   test('voicePitch low is carried (film mode gating happens in the map, not here)', () => {
-    const r = renderAudioSettings({ needs: [{ dimension: 'voicePitch', value: 'low', strength: 'preference' }] });
+    const r = renderXRAudioSettings({ needs: [{ dimension: 'voicePitch', value: 'low', strength: 'preference' }] });
     expect(r.speech.pitchPreference).toBe('low');
   });
   test('floor beats preference for the same dimension', () => {
-    const r = renderAudioSettings({
+    const r = renderXRAudioSettings({
       needs: [
         { dimension: 'readAloudRate', value: 0.9, strength: 'preference' },
         { dimension: 'readAloudRate', value: 0.7, strength: 'floor' },
@@ -73,7 +73,7 @@ describe('individual derivations', () => {
     expect(r.speech.rate).toBe(0.7);
   });
   test('simplify alone → steady expressiveness, continuous mode', () => {
-    const r = renderAudioSettings({ needs: [{ dimension: 'simplify', value: true, strength: 'preference' }] });
+    const r = renderXRAudioSettings({ needs: [{ dimension: 'simplify', value: true, strength: 'preference' }] });
     expect(r.speech.expressiveness).toBe('steady');
     expect(r.delivery.mode).toBe('continuous');
     expect(r.speech.pauseAfterUtteranceMs).toBe(250);

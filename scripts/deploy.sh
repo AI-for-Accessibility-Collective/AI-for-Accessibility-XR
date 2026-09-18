@@ -15,7 +15,7 @@ trap 'rm -f "$TGZ"' EXIT
 
 COPYFILE_DISABLE=1 tar czf "$TGZ" \
   --exclude node_modules --exclude .git --exclude '.env' --exclude '.env.example' \
-  --exclude 'wearable-extension/data' --exclude bench-out --exclude '*.mov' --exclude '*.mp4' \
+  --exclude 'wearable-extension/data' --exclude 'wearable-extension/runs' --exclude 'wearable-extension/.tts-cache' --exclude 'wearable-extension/phone' --exclude bench-out --exclude '*.mov' --exclude '*.mp4' \
   wearable-extension AI-for-Accessibility-Toolkit/toolkit
 
 gcloud compute scp --zone="$ZONE" "$TGZ" "$VM:/tmp/a11y-deploy.tgz"

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Appliance Guide · demo</title>
+<title>Wearable Task Guide · demo</title>
 <style>
   /* Two surfaces: the wearable's view (dark, left) and the toolkit panel
      (light, right). The panel shows only what the film is about — which mode
@@ -14,7 +14,7 @@
     --feed-bg:#0e1116; --feed-panel:#161a21; --feed-line:#262c36; --feed-text:#e6e9ee; --feed-muted:#8b94a1;
     --ink:#1d2330; --muted:#6b7280; --ground:#f5f6f8; --card:#ffffff; --line:#e5e7eb;
     --blue:#2563eb; --green:#15803d; --green-soft:#e7f6ec;
-    --amber:#b45309; --amber-soft:#fff5e0; --amber-line:#f2cf85; --red:#dc2626;
+    --red:#dc2626;
     --you:#60a5fa; --guide:#4ade80;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -58,8 +58,7 @@
   .cap .who { display: block; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 2px; opacity: .85; }
   .cap.user { align-self: flex-end; background: rgba(30,52,84,.94); }
   .cap.user .who { color: var(--you); }
-  .cap.assistant .who, .cap.learn .who { color: var(--guide); }
-  .cap.learn { background: rgba(18,46,38,.96); border-color: #2c6b58; }
+  .cap.assistant .who { color: var(--guide); }
   .cap.speaking { color: var(--feed-muted); font-style: italic; }
   @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
@@ -115,6 +114,13 @@
   /* Latest status only — a single quiet line, never a log. */
   #status-line { padding: 7px 14px; font-size: 11.5px; color: var(--muted); background: var(--card); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+  /* Past runs lives on the glasses server (/webview/runs, password protected);
+     the link stays hidden wherever /status doesn't offer it. */
+  #status-row { display: flex; align-items: center; background: var(--card); border-bottom: 1px solid var(--line); }
+  #status-row #status-line { flex: 1; min-width: 0; border-bottom: 0; }
+  #runs-link { flex: 0 0 auto; padding: 7px 14px 7px 0; font-size: 11.5px; font-weight: 600; color: var(--blue); white-space: nowrap; }
+  #runs-link:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
   #rail-scroll { flex: 1; overflow-y: auto; }
   #rail-main { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 9px; }
@@ -132,23 +138,14 @@
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 999px; background: var(--ground); color: var(--ink); border: 1px solid var(--line); }
   .chips.adapted .chip { background: var(--green-soft); color: var(--green); border-color: transparent; }
-  .chips.waiting .chip { color: var(--muted); font-weight: 500; }
 
-  /* Consent — the visible half of the spoken question. */
-  #consent-card { background: var(--amber-soft); border-color: var(--amber-line); }
-  #consent-card .t { color: var(--amber); }
-  #consent-text { font-size: 13px; line-height: 1.5; }
   .row { display: flex; gap: 6px; }
   .row .btn { flex: 1; }
   .btn { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 7px; padding: 7px 11px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
   .btn:disabled { opacity: .5; cursor: default; }
   .btn.p { background: var(--blue); border-color: var(--blue); color: #fff; }
-  .btn.yes { background: var(--green); border-color: var(--green); color: #fff; }
 
   /* Running a take: Done, Repeat, type a line, what was said. */
-  #done-btn { flex: 1; border: 0; border-radius: 8px; padding: 12px 0; font-size: 15px; font-weight: 700; background: var(--green); color: #fff; }
-  #done-btn:disabled { background: var(--line); color: var(--muted); cursor: default; }
-  #repeat-btn { flex: 0 0 auto; padding: 12px 14px; }
   #task-line b { color: var(--ink); font-weight: 600; }
   .say { display: flex; gap: 6px; }
   .say input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 12.5px; background: var(--card); color: var(--ink); }
@@ -157,27 +154,52 @@
   .lg { line-height: 1.45; }
   .lg .tg { font-weight: 700; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; margin-right: 6px; }
   .lg.user .tg { color: var(--blue); }
-  .lg.assistant .tg, .lg.learn .tg { color: var(--green); }
-  .lg.learn { background: var(--green-soft); border-radius: 6px; padding: 5px 8px; }
+  .lg.assistant .tg { color: var(--green); }
   #agent-empty { color: var(--muted); font-size: 12px; }
 
-  /* The granted profile: plain words, with where each need came from. */
-  .need { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; padding: 6px 0; border-top: 1px solid var(--line); }
+  /* The profile, editable in place: one control per need, in plain words,
+     with where each need came from. Every change saves at once. */
+  .need { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; padding: 9px 0; border-top: 1px solid var(--line); }
   .need:first-child { border-top: 0; padding-top: 0; }
-  .need:last-child { padding-bottom: 0; }
-  .need .k { flex: 1; }
-  .need .v { font-weight: 600; white-space: nowrap; }
+  .need-h { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+  .need-h .k { flex: 1; font-weight: 600; color: var(--ink); }
+  .need-h .v { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .need .src { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
-  .need .src.learned { color: var(--green); background: var(--green-soft); border-color: transparent; }
+  .need .src.edited { color: var(--blue); border-color: rgba(37,99,235,.35); }
+  .need-help { display: flex; align-items: baseline; gap: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+  .need-help span { flex: 1; }
+  .need .rm { border: 0; background: none; color: var(--muted); font-size: 11px; text-decoration: underline; padding: 0 2px; white-space: nowrap; }
+  .need .rm:hover { color: var(--red); }
+  .need.busy { opacity: .6; }
+  .need input[type=range] { width: 100%; accent-color: var(--blue); height: 24px; margin: 0; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; font-size: 12px; font-weight: 600; padding: 7px 4px; border: 0; background: var(--card); color: var(--muted); border-left: 1px solid var(--line); }
+  .seg button:first-child { border-left: 0; }
+  .seg button[aria-checked="true"] { background: var(--ink); color: #fff; }
+  .seg button[aria-checked="true"]::before { content: "✓ "; }
+  .seg button:focus-visible { outline: 2px solid var(--blue); outline-offset: -3px; }
+  .switch.sm { width: 34px; height: 20px; }
+  .add-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 9px; border-top: 1px dashed var(--line); font-size: 11.5px; color: var(--muted); }
+  .add-row .lbl { margin-right: 2px; }
+  .add-btn { border: 1px dashed var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 3px 10px; font-size: 11.5px; font-weight: 600; }
+  .add-btn:hover { border-color: var(--blue); color: var(--blue); }
+  .profile-foot { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+  .profile-foot .msg { flex: 1; font-size: 11.5px; color: var(--muted); }
+  .profile-foot .msg.ok { color: var(--green); font-weight: 600; }
+  .profile-foot .msg.err { color: var(--red); font-weight: 600; }
+  .profile-foot .msg.fade { transition: opacity .6s ease 2.4s; opacity: 0; }
+  .profile-foot .btn { font-size: 11.5px; padding: 5px 9px; }
 
   #rail-footer { display: flex; gap: 6px; padding: 10px 12px; background: var(--card); border-top: 1px solid var(--line); }
-  #rail-footer .sp { flex: 1; }
   #source-btn { font-weight: 500; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
   #source-btn b { font-weight: 600; }
 
   /* Shown after ■ Stop, or when the demo process is gone. */
   #stopped-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(14,17,22,.94); display: flex; align-items: center; justify-content: center; padding: 24px; }
   #stopped-overlay[hidden] { display: none; }
+  /* Asked when the mode is changed while the guide is Live. */
+  .modal { position: fixed; inset: 0; z-index: 90; background: rgba(14,17,22,.7); display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .modal .btn { padding: 10px 14px; font-size: 13.5px; }
   .stopped-card { background: var(--card); color: var(--ink); border-radius: 12px; padding: 24px 28px; max-width: 460px; }
   .stopped-card h2 { font-size: 20px; margin-bottom: 8px; }
   .stopped-card p { font-size: 14px; line-height: 1.5; color: var(--muted); margin-top: 6px; }
@@ -191,7 +213,10 @@
     #rail-scroll { overflow: visible; }
     #source-btn { max-width: none; }
   }
-  @media (prefers-reduced-motion: reduce) { .cap { animation: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .cap { animation: none; }
+    .switch .track, .switch .track::before, .profile-foot .msg.fade { transition: none; }
+  }
 </style>
 </head>
 <body>
@@ -213,7 +238,7 @@
   <!-- ============ toolkit panel ============ -->
   <aside id="rail" aria-label="Toolkit panel">
     <div id="rail-header">
-      <h1>Appliance Guide <small>the same guide, without and with the toolkit</small></h1>
+      <h1>Wearable Task Guide <small>the same guide, without and with the toolkit</small></h1>
       <label id="power-label" for="power" title="Start/pause the guide (Gemini)">▶ Start</label>
       <label class="switch" title="Start/pause the guide (Gemini)">
         <input type="checkbox" id="power" aria-label="Guide on/off">
@@ -221,20 +246,13 @@
       </label>
       <button id="stop-all" title="Turn Gemini off and shut the demo down">■ Stop</button>
     </div>
-    <div id="status-line" aria-live="polite">Pick a video source to begin.</div>
+    <div id="status-row">
+      <div id="status-line" aria-live="polite">Pick a video source to begin.</div>
+      <a id="runs-link" href="/runs" hidden>Past runs →</a>
+    </div>
 
     <div id="rail-scroll">
       <div id="rail-main">
-
-        <!-- Consent card (hidden until the guide asks) -->
-        <section class="card" id="consent-card" hidden>
-          <div class="card-h"><span class="t" id="consent-title">Permission request</span></div>
-          <p id="consent-text"></p>
-          <div class="row">
-            <button class="btn yes" id="consent-yes">Yes, that's okay</button>
-            <button class="btn" id="consent-no">Not now</button>
-          </div>
-        </section>
 
         <!-- Mode (the A/B switch) + how the guide speaks right now -->
         <section class="card" id="mode-card">
@@ -253,10 +271,6 @@
             <span class="t">Guide</span>
             <span class="note" id="task-line" hidden>Task: <b id="task-name"></b> · step <span id="task-step">0</span></span>
           </div>
-          <div class="row">
-            <button id="done-btn" title="Tell the guide this step is done">✓ Done — next step</button>
-            <button class="btn" id="repeat-btn" title="Ask the guide to say that again">↻ Repeat</button>
-          </div>
           <div class="say">
             <label for="say" class="sr-only">Say something to the guide</label>
             <input id="say" placeholder='Type “help me start the washing machine”' autocomplete="off">
@@ -265,10 +279,17 @@
           <div id="agent-log"><div id="agent-empty">Nothing yet. Press ▶ Start, then talk or type.</div></div>
         </section>
 
-        <!-- My Profile (the granted AbilityModel slice) -->
-        <section class="card" id="profile-card">
-          <div class="card-h"><span class="t">My Profile</span><span class="badge" id="profile-badge" hidden>granted</span></div>
+        <!-- My Profile: the needs the guide adapts to, edited in place. Each
+             control saves the moment it changes; the card re-renders from the
+             server's answer. -->
+        <section class="card" id="profile-card" aria-labelledby="profile-title">
+          <div class="card-h"><span class="t" id="profile-title">My Profile</span><span class="badge" id="profile-badge" hidden>in use</span></div>
+          <div class="note" id="profile-note" hidden></div>
           <div id="profile-body"></div>
+          <div class="profile-foot">
+            <span class="msg" id="profile-msg" role="status" aria-live="polite"></span>
+            <button class="btn" id="profile-reset" hidden>Reset to default</button>
+          </div>
         </section>
 
       </div>
@@ -276,10 +297,30 @@
 
     <div id="rail-footer">
       <button class="btn" id="source-btn" title="Change the video source">Source: <b id="source-pill-v">—</b> ▾</button>
-      <span class="sp"></span>
-      <button class="btn" id="reset" title="Wipe the app store and re-import the fixture profile">↺ Reset take</button>
     </div>
   </aside>
+
+  <div id="mode-ask" class="modal" hidden role="alertdialog" aria-labelledby="mode-ask-title" aria-describedby="mode-ask-text">
+    <div class="stopped-card">
+      <h2 id="mode-ask-title">Pause the guide to switch</h2>
+      <p id="mode-ask-text">The guide is live. A take runs in one mode from start to finish, so switching pauses it and ends the current task. Press ▶ Start again to begin the new take.</p>
+      <div class="row" style="margin-top:16px">
+        <button class="btn p" id="mode-ask-ok">Pause and switch</button>
+        <button class="btn" id="mode-ask-cancel">Keep going</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="reset-ask" class="modal" hidden role="alertdialog" aria-labelledby="reset-ask-title" aria-describedby="reset-ask-text">
+    <div class="stopped-card">
+      <h2 id="reset-ask-title">Reset to default?</h2>
+      <p id="reset-ask-text">Every edit made here is replaced by the four needs from her onboarding: one step at a time, 0.8× speaking rate, plain words, captions.</p>
+      <div class="row" style="margin-top:16px">
+        <button class="btn p" id="reset-ask-ok">Reset profile</button>
+        <button class="btn" id="reset-ask-cancel">Keep my edits</button>
+      </div>
+    </div>
+  </div>
 
   <div id="stopped-overlay" hidden role="alertdialog" aria-labelledby="stopped-title" aria-describedby="stopped-text">
     <div class="stopped-card">
@@ -343,10 +384,10 @@
   }
 
   // ---- captions (on the feed) ----
-  // Assistant lines show as real captions only when the granted profile asks
+  // Assistant lines show as real captions only when the profile asks
   // for captions — in baseline the overlay shows just “Speaking…”. That
   // asymmetry IS the filmed feature.
-  const LABELS = { user: 'You', assistant: 'Guide', learn: 'Learned' };
+  const LABELS = { user: 'You', assistant: 'Guide' };
   function addCaption(e) {
     if (!LABELS[e.type]) return;
     const speakingOnly = e.type === 'assistant' && !captionsMirror;
@@ -361,7 +402,7 @@
     setTimeout(() => { el.remove(); }, 7800);
   }
 
-  // ---- conversation log (You / Guide / Learned) + one status line ----
+  // ---- conversation log (You / Guide) + one status line ----
   const agentLog = $('agent-log');
   function addLog(e) {
     if (!LABELS[e.type]) {
@@ -412,27 +453,6 @@
   sayInput.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') send(); });
 
   // ---- guide controls: Done / Repeat ("stop" can be typed) ----
-  $('done-btn').onclick = () => sendText('done');
-  $('repeat-btn').onclick = () => sendText('repeat');
-
-  // ---- consent card ----
-  let consentCardId = null;
-  function renderConsent(cardState) {
-    const sec = $('consent-card');
-    if (!cardState) { sec.hidden = true; consentCardId = null; return; }
-    if (consentCardId === cardState.id && !sec.hidden) return;
-    consentCardId = cardState.id;
-    $('consent-title').textContent = cardState.kind === 'grant' ? 'Permission request' : 'Suggestion from your guide';
-    $('consent-text').textContent = cardState.body;
-    sec.hidden = false;
-  }
-  function answerConsent(response) {
-    if (stopped) return;
-    fetch('/consent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ response }) });
-    $('consent-card').hidden = true;
-  }
-  $('consent-yes').onclick = () => answerConsent('accept');
-  $('consent-no').onclick = () => answerConsent('declineOnce');
 
   // ---- master toggle: start/pause the guide (POST /active) ----
   const powerInput = $('power');
@@ -458,21 +478,20 @@
   function renderMode(state) {
     currentMode = state.mode;
     const toolkit = state.mode === 'toolkit';
-    const waiting = toolkit && !state.granted;
     modeButtons.forEach((b) => {
       b.classList.toggle('active', b.dataset.mode === state.mode);
       b.disabled = state.switching;
     });
     $('mode-status').textContent = state.switching ? 'switching…' : '';
     const badge = $('mode-badge');
-    badge.textContent = toolkit ? 'Toolkit' + (state.granted ? ' · profile on' : '') : 'Baseline';
+    badge.textContent = toolkit ? 'Toolkit' + (state.profileOn ? ' · profile on' : '') : 'Baseline';
     badge.classList.toggle('toolkit', toolkit);
 
     // How the guide speaks right now — the output side of the adaptation.
     const chips = $('delivery-chips');
     chips.innerHTML = '';
-    chips.className = 'chips' + (toolkit && state.granted ? ' adapted' : '') + (waiting ? ' waiting' : '');
-    const items = state.switching ? [] : waiting ? ['waiting for consent'] : [
+    chips.className = 'chips' + (toolkit && state.profileOn ? ' adapted' : '');
+    const items = state.switching ? [] : [
       (Number(state.rate) || 1).toFixed(1) + '× speed',
       state.deliveryMode === 'stepwise' ? 'one step at a time' : 'all at once',
       state.captionsMirror ? 'captions' : 'no captions',
@@ -480,71 +499,282 @@
     for (const t of items) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = t; chips.appendChild(c); }
     $('mode-note').textContent = state.switching ? ''
       : !toolkit ? 'Same model, raw answer, default delivery.'
-      : state.granted ? 'Same model — prompt and delivery adapted to the profile below.'
-      : 'The guide asks the wearer before reading their profile.';
+      : state.profileOn ? 'Same model — prompt and delivery adapted to the profile below.'
+      : 'No profile found in the data folder — default delivery.';
   }
+  function switchMode(mode) {
+    lastModeAt = Date.now();
+    renderMode({ mode, switching: true, profileOn: false, rate: 1, deliveryMode: 'continuous', captionsMirror: false });
+    fetch('/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+  }
+
+  // A take is one mode from Start to pause. While the guide is Live, the
+  // mode can't change under it: the pop-up pauses first, then switches, and
+  // the new take begins with ▶ Start.
+  let wantedMode = null;
+  function closeModeAsk() { wantedMode = null; $('mode-ask').hidden = true; }
+  $('mode-ask-cancel').onclick = closeModeAsk;
+  $('mode-ask-ok').onclick = async () => {
+    const mode = wantedMode;
+    closeModeAsk();
+    if (!mode || stopped) return;
+    active = false; lastActiveAt = Date.now(); renderPower();
+    try {
+      await fetch('/active', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: false }) });
+    } catch {}
+    switchMode(mode);
+  };
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !$('mode-ask').hidden) closeModeAsk(); });
+
   modeButtons.forEach((b) => {
     b.onclick = () => {
       if (stopped || b.dataset.mode === currentMode) return;
-      lastModeAt = Date.now();
-      renderMode({ mode: b.dataset.mode, switching: true, granted: false, rate: 1, deliveryMode: 'continuous', captionsMirror: false });
-      fetch('/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: b.dataset.mode }) });
+      if (active) {
+        wantedMode = b.dataset.mode;
+        const name = wantedMode === 'toolkit' ? 'Toolkit' : 'Baseline';
+        $('mode-ask-title').textContent = 'Pause the guide to switch to ' + name;
+        $('mode-ask-ok').textContent = 'Pause and switch to ' + name;
+        $('mode-ask').hidden = false;
+        $('mode-ask-ok').focus();
+        return;
+      }
+      switchMode(b.dataset.mode);
     };
   });
 
-  // ---- My Profile (granted needs, in plain words, with provenance) ----
-  const NEED_LABELS = {
-    readAloudRate: (v) => ['Speaking rate', Number(v).toFixed(1) + '×'],
-    pacing: (v) => ['Pacing', v === 'stepwise' ? 'one step at a time' : String(v)],
-    simplify: (v) => ['Plain words', v ? 'on' : 'off'],
-    captions: (v) => ['Captions', v ? 'on' : 'off'],
-    spokenDetail: (v) => ['Detail', v === 'gist' ? 'gist first' : String(v)],
-    voicePitch: (v) => ['Voice', String(v)],
-  };
-  const SOURCE_LABELS = { 'setup-script': 'set up', 'onboarding-derived': 'onboarding', 'wearable-extension-insight': 'learned here' };
-  let profileKey = '';
-  function renderProfile(state) {
-    const key = state.mode + '|' + state.granted + '|' + JSON.stringify(state.needs || []);
-    if (key === profileKey) return;
-    profileKey = key;
-    const body = $('profile-body');
-    body.innerHTML = '';
-    $('profile-badge').hidden = !state.granted;
-    if (!state.granted) {
-      const d = document.createElement('div'); d.className = 'note';
-      d.textContent = state.mode === 'toolkit'
-        ? 'Not shared yet — answer the spoken question, or tap the card above.'
-        : 'Not in use. Switch to Toolkit; the guide asks before reading it.';
-      body.appendChild(d);
-      return;
-    }
-    for (const n of state.needs || []) {
-      const [label, value] = (NEED_LABELS[n.dimension] || ((v) => [n.dimension, JSON.stringify(v)]))(n.value);
-      const row = document.createElement('div'); row.className = 'need';
-      row.title = n.dimension + ': ' + JSON.stringify(n.value) + (n.source ? ' · source ' + n.source : '');
-      const k = document.createElement('span'); k.className = 'k'; k.textContent = label;
-      const v = document.createElement('span'); v.className = 'v'; v.textContent = value;
-      const s = document.createElement('span'); s.className = 'src' + (n.source === 'wearable-extension-insight' ? ' learned' : '');
-      s.textContent = SOURCE_LABELS[n.source] || n.source || '';
-      row.appendChild(k); row.appendChild(v); if (s.textContent) row.appendChild(s);
-      body.appendChild(row);
+  // ---- My Profile: direct-manipulation editor (GET/POST /profile) ----
+  // The server describes each need (label, help, kind, allowed values,
+  // provenance); this only draws the control for it and posts one change at a
+  // time. Every answer to a write is the fresh profile, which is what the
+  // card re-renders from — a failed write reverts by re-rendering the last
+  // good profile. Built with the DOM API (textContent), never markup.
+  const SOURCE_LABELS = { 'setup-script': 'set up', 'onboarding-derived': 'onboarding', 'profile-editor': 'edited here' };
+  const profileBody = $('profile-body');
+  const profileMsg = $('profile-msg');
+  let profile = null;          // the last profile the server sent
+  let profileSaving = 0;       // writes in flight (a refresh must not fight them)
+  let profileMsgTimer = null;
+
+  function formatValue(n) {
+    if (n.kind === 'range') return Number(n.value).toFixed(1) + (n.unit || '');
+    if (n.kind === 'toggle') return n.value ? 'on' : 'off';
+    if (n.kind === 'choice') { const o = (n.options || []).find((x) => x.value === n.value); return o ? o.label : String(n.value); }
+    return JSON.stringify(n.value);
+  }
+
+  function showProfileMsg(text, cls) {
+    clearTimeout(profileMsgTimer);
+    profileMsg.className = 'msg ' + cls;
+    profileMsg.textContent = text;
+    if (cls === 'ok') profileMsgTimer = setTimeout(() => profileMsg.classList.add('fade'), 50);
+  }
+
+  // One change → saved at once. The row dims while the write is out; the
+  // answer (or the last good profile, on failure) redraws the whole card.
+  async function saveNeed(key, value, row) {
+    if (stopped) return;
+    profileSaving++;
+    if (row) row.classList.add('busy');
+    try {
+      const r = await fetch('/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, value }) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+      profile = body;
+      renderProfile();
+      const spec = profile.needs.find((n) => n.key === key);
+      showProfileMsg(spec ? 'Saved — ' + spec.label + ': ' + formatValue(spec) : 'Saved — removed', 'ok');
+    } catch (e) {
+      renderProfile(); // put the control back to what the server has
+      showProfileMsg('Not saved: ' + (e && e.message ? e.message : e), 'err');
+    } finally {
+      profileSaving--;
     }
   }
+
+  async function loadProfile() {
+    if (stopped || profileSaving) return;
+    try {
+      const r = await fetch('/profile');
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) { profile = { unavailable: body.error || ('HTTP ' + r.status) }; }
+      else profile = body;
+    } catch {
+      profile = { unavailable: 'The demo is not answering.' };
+    }
+    if (!profileSaving) renderProfile();
+  }
+
+  function mkControl(n, row) {
+    if (n.kind === 'toggle') {
+      const lab = document.createElement('label'); lab.className = 'switch sm'; lab.title = n.label + ' on/off';
+      const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('role', 'switch');
+      inp.checked = !!n.value; inp.setAttribute('aria-label', n.label); inp.dataset.focus = n.key + ':toggle';
+      inp.onchange = () => saveNeed(n.key, inp.checked, row);
+      const track = document.createElement('span'); track.className = 'track';
+      lab.append(inp, track);
+      return lab;
+    }
+    if (n.kind === 'choice') {
+      const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', n.label);
+      for (const o of n.options || []) {
+        const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', o.value === n.value ? 'true' : 'false'); b.textContent = o.label;
+        b.dataset.focus = n.key + ':opt:' + o.value;
+        b.onclick = () => { if (o.value !== n.value) saveNeed(n.key, o.value, row); };
+        seg.appendChild(b);
+      }
+      return seg;
+    }
+    if (n.kind === 'range') {
+      const inp = document.createElement('input'); inp.type = 'range';
+      inp.min = n.min; inp.max = n.max; inp.step = n.step; inp.value = n.value;
+      inp.setAttribute('aria-label', n.label); inp.dataset.focus = n.key + ':range';
+      inp.id = 'need-' + n.key;
+      // Live value while dragging; the write goes out on release.
+      inp.oninput = () => { const out = row.querySelector('.v'); if (out) out.textContent = Number(inp.value).toFixed(1) + (n.unit || ''); };
+      inp.onchange = () => saveNeed(n.key, Number(inp.value), row);
+      return inp;
+    }
+    return null;
+  }
+
+  // Rendering rebuilds the card, so whatever had keyboard focus is put back
+  // by its data-focus tag — or, once a need is removed/added, the nearest
+  // control for the same need — so a keyboard presenter never loses their place.
+  function restoreFocus(tag) {
+    if (!tag) return;
+    const find = (t) => profileBody.querySelector('[data-focus="' + t.replace(/"/g, '') + '"]');
+    const key = tag.split(':')[0] === 'add' ? tag.split(':')[1] : tag.split(':')[0];
+    const el = find(tag) || profileBody.querySelector('[data-focus^="' + key + ':"]') || find('add:' + key);
+    if (el) el.focus({ preventScroll: true });
+  }
+
+  function renderProfile() {
+    const p = profile;
+    const focused = document.activeElement && profileBody.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
+    profileBody.innerHTML = '';
+    const note = $('profile-note');
+    const badge = $('profile-badge');
+    const resetBtn = $('profile-reset');
+    if (!p || p.unavailable) {
+      badge.hidden = true; resetBtn.hidden = true;
+      note.hidden = false;
+      note.textContent = p && p.unavailable ? p.unavailable : 'Loading the profile…';
+      return;
+    }
+    resetBtn.hidden = false;
+    badge.hidden = !p.profileOn;
+    note.hidden = false;
+    note.textContent = p.mode !== 'toolkit'
+      ? 'Baseline ignores the profile: edits are saved, and used the moment the guide is in Toolkit mode.'
+      : p.profileOn ? 'In use now — a change shapes the guide from its next turn.'
+      : 'The store holds no profile yet. Add a need below, or reset to default.';
+
+    for (const n of p.needs) {
+      const row = document.createElement('div'); row.className = 'need'; row.dataset.key = n.key;
+      const h = document.createElement('div'); h.className = 'need-h';
+      const k = document.createElement('span'); k.className = 'k'; k.textContent = n.label;
+      h.appendChild(k);
+      if (n.source) {
+        const s = document.createElement('span'); s.className = 'src' + (n.source === 'profile-editor' ? ' edited' : '');
+        s.textContent = SOURCE_LABELS[n.source] || n.source;
+        s.title = (n.strength ? n.strength + ' · ' : '') + n.source;
+        h.appendChild(s);
+      }
+      const ctl = mkControl(n, row);
+      if (n.kind === 'toggle') h.appendChild(ctl);
+      else {
+        const v = document.createElement('output'); v.className = 'v'; v.textContent = formatValue(n);
+        if (n.kind === 'range') v.setAttribute('for', 'need-' + n.key);
+        h.appendChild(v);
+      }
+      row.appendChild(h);
+
+      const help = document.createElement('div'); help.className = 'need-help';
+      const ht = document.createElement('span'); ht.textContent = n.help; help.appendChild(ht);
+      const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'rm';
+      rm.textContent = 'remove'; rm.setAttribute('aria-label', 'Remove ' + n.label + ' from the profile');
+      rm.dataset.focus = n.key + ':rm';
+      rm.onclick = () => saveNeed(n.key, null, row);
+      help.appendChild(rm);
+      row.appendChild(help);
+
+      if (ctl && n.kind !== 'toggle') {
+        if (n.kind === 'range') {
+          const lab = document.createElement('label'); lab.className = 'sr-only'; lab.htmlFor = ctl.id; lab.textContent = n.label;
+          row.appendChild(lab);
+        }
+        row.appendChild(ctl);
+      }
+      profileBody.appendChild(row);
+    }
+
+    if (!p.needs.length) {
+      const d = document.createElement('div'); d.className = 'note'; d.textContent = 'No needs set — the guide runs with defaults.';
+      profileBody.appendChild(d);
+    }
+
+    // Needs the app knows that the profile does not set: one tap adds one,
+    // starting at the surface's default (so adding never changes delivery by
+    // itself) — the control then appears above for the real choice.
+    if (p.available && p.available.length) {
+      const add = document.createElement('div'); add.className = 'add-row';
+      const lbl = document.createElement('span'); lbl.className = 'lbl'; lbl.textContent = 'Add a need:'; add.appendChild(lbl);
+      for (const a of p.available) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'add-btn';
+        b.textContent = '+ ' + a.label; b.title = a.help; b.dataset.focus = 'add:' + a.key;
+        b.onclick = () => saveNeed(a.key, a.default, null);
+        add.appendChild(b);
+      }
+      profileBody.appendChild(add);
+    }
+    restoreFocus(focused);
+  }
+
+  // Reset asks first — it throws away every edit in one go.
+  function closeResetAsk() { $('reset-ask').hidden = true; }
+  $('profile-reset').onclick = () => { if (!stopped) { $('reset-ask').hidden = false; $('reset-ask-ok').focus(); } };
+  $('reset-ask-cancel').onclick = closeResetAsk;
+  $('reset-ask-ok').onclick = async () => {
+    closeResetAsk();
+    if (stopped) return;
+    profileSaving++;
+    try {
+      const r = await fetch('/profile/reset', { method: 'POST' });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || ('HTTP ' + r.status));
+      profile = body;
+      renderProfile();
+      showProfileMsg("Reset to default", 'ok');
+    } catch (e) {
+      renderProfile();
+      showProfileMsg('Not reset: ' + (e && e.message ? e.message : e), 'err');
+    } finally {
+      profileSaving--;
+    }
+  };
+  document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !$('reset-ask').hidden) closeResetAsk(); });
+
+  // The card follows the session: a mode switch changes whether the profile
+  // is in use, and an edit from another page shows up in the state's needs.
+  let profileStateKey = '';
+  function syncProfile(state) {
+    const key = state.mode + '|' + state.profileOn + '|' + JSON.stringify(state.needs || []);
+    if (key === profileStateKey) return;
+    profileStateKey = key;
+    loadProfile();
+  }
+  loadProfile();
+  // A slow refresh catches edits made in another tab while in baseline (the
+  // session state carries no needs then); it never runs mid-drag or mid-save.
+  setInterval(() => { if (!document.activeElement || !profileBody.contains(document.activeElement)) loadProfile(); }, 5000);
 
   // ---- task line + Done ----
   function renderTask(state) {
     const t = state.task;
     $('task-line').hidden = !t;
     if (t) { $('task-name').textContent = t.id; $('task-step').textContent = String(t.stepCount); }
-    $('done-btn').disabled = !(t && t.active && state.deliveryMode === 'stepwise');
   }
-
-  // ---- footer: Reset take ----
-  $('reset').onclick = async () => {
-    if (stopped) return;
-    if (!confirm('Reset the take? Wipes the app store and re-imports the fixture profile.')) return;
-    try { await fetch('/reset', { method: 'POST' }); } catch {}
-  };
 
   // ---- status polling ----
   let pollFailures = 0;
@@ -555,15 +785,15 @@
       pollFailures = 0;
       currentSource = s.source;
       canShutdown = s.canShutdown !== false;
+      $('runs-link').hidden = s.runs !== true;
       applyFeedBlank(currentSource === 'none');
       feed.classList.toggle('mirror', currentSource === 'webcam');
       if (typeof s.active === 'boolean' && Date.now() - lastActiveAt > 1500) { active = s.active; renderPower(); }
       const st = s.state || {};
       captionsMirror = !!st.captionsMirror;
       if (Date.now() - lastModeAt > 1500) renderMode(st);
-      renderProfile(st);
+      syncProfile(st);
       renderTask(st);
-      renderConsent(st.consentCard);
       // Source button + picker state.
       sourceCatalog = s.sourceCatalog || null;
       canSetSource = !!s.canSetSource;
@@ -754,7 +984,7 @@
   // ---- mic: speech input (stands in for the glasses mic) ----
   // Browser Web Speech API, always listening. The strip under the feed shows
   // interim words; each finalized phrase is sent to /say (it comes back as a
-  // 'You' caption via SSE). This is also how spoken consent answers arrive.
+  // 'You' caption via SSE).
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const listening = $('listening');
   const liveTranscript = $('live-transcript');

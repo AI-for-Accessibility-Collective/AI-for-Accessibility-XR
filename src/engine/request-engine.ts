@@ -6,8 +6,7 @@
 //   - turn() RETURNS the reply text instead of speaking it (the speaker owns
 //     delivery — the whole A/B rests on that separation);
 //   - the conversation keeps its own history as an explicit contents array
-//     and passes systemInstruction per call, so the prompt block can change
-//     mid-conversation (an accepted insight) without losing task progress;
+//     and passes systemInstruction per call;
 //   - requests go over gemini-rest.ts (direct REST), not the deprecated SDK,
 //     which stripped thinkingConfig and let thought tokens truncate replies.
 //
@@ -30,10 +29,12 @@ export interface ConversationOpts {
   // Cap on retained turns (user+model pairs), so a long rehearsal session
   // doesn't grow the prompt without bound.
   maxHistoryTurns?: number;
+  // The reply as it is being written, so a caller can start making the voice
+  // for its first sentences before the model has finished the last.
+  onPartial?: (soFar: string) => void;
 }
 
 export function createConversation(opts: ConversationOpts, fetchImpl?: typeof fetch): TurnEngine {
-  let systemInstruction = opts.systemInstruction;
   let history: GeminiContent[] = [];
   let chain: Promise<unknown> = Promise.resolve();
 
@@ -48,10 +49,11 @@ export function createConversation(opts: ConversationOpts, fetchImpl?: typeof fe
       {
         apiKey: opts.apiKey,
         model: opts.model,
-        systemInstruction,
+        systemInstruction: opts.systemInstruction,
         contents: [...history, { role: 'user', parts }],
         maxOutputTokens: opts.maxOutputTokens ?? TURN_MAX_OUTPUT_TOKENS,
         temperature: opts.temperature ?? 0.2,
+        onText: opts.onPartial,
       },
       fetchImpl,
     );
@@ -82,9 +84,6 @@ export function createConversation(opts: ConversationOpts, fetchImpl?: typeof fe
       );
       chain = p.catch(() => {});
       return p;
-    },
-    setSystemInstruction(si: string): void {
-      systemInstruction = si;
     },
     reset(): void {
       history = [];

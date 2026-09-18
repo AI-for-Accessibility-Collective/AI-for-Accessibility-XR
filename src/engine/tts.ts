@@ -1,10 +1,10 @@
 // Gemini text-to-speech for the demo speaker.
 //
 // On real glasses the device speaks via Mentra's TTS with the ElevenLabs
-// SpeakOptions from elevenlabs-map.ts. This lets the BROWSER demo voice
+// SpeakOptions from toolkit-candidates/adapters/voice.ts. This lets the BROWSER demo voice
 // replies through the laptop speaker using Gemini, so a screen-share and a
 // rehearsal actually have audio. Gemini TTS has no numeric knobs — the
-// caller approximates the render by prepending gemini-style.ts's style line
+// caller approximates the render by prepending voice.ts's style line
 // to the text (docs/DESIGN.md §5.1 layer 2).
 //
 // Uses the REST generateContent endpoint with responseModalities: ['AUDIO'].
@@ -16,7 +16,7 @@
 
 import { guardedRequest, redactKey } from './gemini-rest.ts';
 
-function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
+export function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
   const numChannels = 1;
   const bitsPerSample = 16;
   const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
@@ -50,7 +50,7 @@ export async function synthesizeSpeech(opts: {
   model: string;
   voice: string;
   text: string;
-  // gemini-style.ts's style instruction, prepended when present.
+  // voice.ts's style instruction, prepended when present.
   stylePrefix?: string;
 }): Promise<{ wav: Buffer; mime: string } | null> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`;
@@ -93,4 +93,31 @@ export async function synthesizeSpeech(opts: {
   } finally {
     request.release();
   }
+}
+
+// A spoken line as PCM WAV is ~50 kB per second; the phone downloads each
+// clip (twice, the way iOS's player probes files) before it can play. AAC is
+// a tenth of the size and plays natively on both phones. ADTS framing streams
+// from a pipe without ffmpeg needing to seek. Falls back to the WAV if
+// ffmpeg is missing or fails.
+export async function toAac(wav: Buffer): Promise<{ audio: Buffer; mime: string; ext: string }> {
+  const { spawn } = await import('node:child_process');
+  return new Promise((resolve) => {
+    const ff = spawn('ffmpeg', ['-loglevel', 'error', '-f', 'wav', '-i', 'pipe:0', '-c:a', 'aac', '-b:a', '48k', '-f', 'adts', 'pipe:1'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const out: Buffer[] = [];
+    let err = '';
+    ff.stdout.on('data', (d: Buffer) => out.push(d));
+    ff.stderr.on('data', (d: Buffer) => (err += d.toString()));
+    ff.on('error', () => resolve({ audio: wav, mime: 'audio/wav', ext: 'wav' }));
+    ff.on('close', (code) => {
+      if (code === 0 && out.length) resolve({ audio: Buffer.concat(out), mime: 'audio/aac', ext: 'aac' });
+      else {
+        console.warn(`[tts] aac transcode failed (${code}): ${err.slice(0, 120)} — sending WAV`);
+        resolve({ audio: wav, mime: 'audio/wav', ext: 'wav' });
+      }
+    });
+    ff.stdin.end(wav);
+  });
 }

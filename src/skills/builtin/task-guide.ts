@@ -18,7 +18,7 @@ import type { GuideSkill, SkillMeta } from '../types.ts';
 
 export const taskGuideMeta: SkillMeta = {
   id: 'task-guide',
-  name: 'Task Guide',
+  name: 'Wearable Task Guide',
   description: 'Walks you through a household task — one step at a time when your profile asks for it.',
   supportAreas: ['cognitive', 'memory'],
   icon: 'checklist',

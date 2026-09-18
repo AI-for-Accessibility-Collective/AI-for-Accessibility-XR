@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Appliance Guide · control</title>
+<title>Wearable Task Guide · control</title>
 <style>
   :root {
     --bg:#0b0d10; --panel:#14181d; --line:#232a31; --text:#e8edf2; --muted:#8a96a3;
@@ -19,6 +19,10 @@
   header { display:flex; align-items:center; justify-content:space-between; gap:10px; }
   header h1 { font-size:16px; font-weight:700; margin:0; letter-spacing:-.2px; }
   header .meta { font-size:12px; color:var(--muted); text-align:right; }
+  /* Shown only when the server has the password-protected run history on. */
+  #runs-link { display:inline-block; margin-top:2px; color:var(--user); font-size:13px; font-weight:600; }
+  #runs-link[hidden] { display:none; }
+  #runs-link:focus-visible { outline:2px solid var(--user); outline-offset:2px; border-radius:4px; }
 
   /* live feed */
   #feedwrap { position:relative; background:#000; border:1px solid var(--line); border-radius:12px;
@@ -45,23 +49,50 @@
   #modeseg button:disabled { opacity:.6; }
   #mode-note { font-size:12px; color:var(--muted); margin-top:7px; }
 
-  /* consent card */
-  #consent { display:none; background:#2b2413; border:1px solid #6b5a1e; border-radius:12px; padding:12px 14px; }
-  #consent.show { display:block; }
-  #consent .t { font-size:13px; font-weight:700; color:#e8c268; margin-bottom:5px; }
-  #consent .b { font-size:14px; margin-bottom:10px; }
-  #consent .row { display:flex; gap:8px; }
-  #consent button { flex:1; border:0; border-radius:9px; padding:11px 0; font:inherit; font-weight:700; cursor:pointer; }
-  #consent .yes { background:var(--on); color:#001022; }
-  #consent .no { background:var(--panel); color:var(--text); border:1px solid var(--line); }
-
   /* guide controls */
-  #done { width:100%; border:0; border-radius:12px; padding:15px; font:inherit; font-size:16px;
-    font-weight:800; cursor:pointer; background:var(--assistant); color:#001022; }
-  #done:disabled { background:var(--panel); color:var(--muted); }
   .guiderow { display:flex; gap:8px; margin-top:8px; }
   .guiderow button { flex:1; border:1px solid var(--line); background:var(--panel); color:var(--text);
     font:inherit; font-size:14px; font-weight:600; padding:11px 0; border-radius:10px; cursor:pointer; }
+
+  /* My profile: the same editor as the demo page, packed for a phone. One
+     control per need; every change saves at once. */
+  #profile-note { font-size:12px; color:var(--muted); margin:0 0 6px; }
+  #profile-note .on { color:var(--on); font-weight:700; }
+  .need { display:flex; flex-direction:column; gap:6px; padding:10px 0; border-top:1px solid var(--line); }
+  .need:first-child { border-top:0; padding-top:0; }
+  .need-h { display:flex; align-items:center; gap:8px; min-height:24px; }
+  .need-h .k { flex:1; font-size:15px; font-weight:600; }
+  .need-h .v { font-size:14px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .need .src { font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:1px 7px; white-space:nowrap; }
+  .need .src.edited { color:var(--user); border-color:rgba(78,161,255,.4); }
+  .need-help { display:flex; align-items:baseline; gap:8px; font-size:12px; color:var(--muted); line-height:1.4; }
+  .need-help span { flex:1; }
+  .need .rm { border:0; background:none; color:var(--muted); font:inherit; font-size:12px; text-decoration:underline; padding:0 2px; }
+  .need.busy { opacity:.6; }
+  .need input[type=range] { width:100%; accent-color:var(--user); height:32px; margin:0; }
+  .seg { display:flex; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .seg button { flex:1; font:inherit; font-size:13px; font-weight:600; padding:10px 4px; border:0; border-left:1px solid var(--line);
+    background:var(--panel); color:var(--muted); cursor:pointer; }
+  .seg button:first-child { border-left:0; }
+  .seg button[aria-checked="true"] { background:var(--user); color:#001022; }
+  .seg button[aria-checked="true"]::before { content:"✓ "; }
+  .sw { position:relative; width:44px; height:26px; flex:0 0 auto; }
+  .sw input { opacity:0; width:0; height:0; position:absolute; }
+  .sw .track { position:absolute; inset:0; background:var(--off); border-radius:13px; transition:.2s; cursor:pointer; }
+  .sw .track::before { content:""; position:absolute; width:22px; height:22px; left:2px; top:2px; background:#fff; border-radius:50%; transition:.2s; }
+  .sw input:checked + .track { background:var(--on); }
+  .sw input:checked + .track::before { transform:translateX(18px); }
+  .add-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding-top:10px; border-top:1px dashed var(--line); font-size:12px; color:var(--muted); }
+  .add-btn { border:1px dashed var(--line); background:var(--panel); color:var(--text); font:inherit; font-size:13px; font-weight:600; border-radius:999px; padding:6px 12px; cursor:pointer; }
+  .profile-foot { display:flex; align-items:center; gap:8px; min-height:28px; margin-top:8px; }
+  .profile-foot .msg { flex:1; font-size:12px; color:var(--muted); }
+  .profile-foot .msg.ok { color:var(--on); font-weight:700; }
+  .profile-foot .msg.err { color:var(--alert); font-weight:700; }
+  .profile-foot .msg.fade { transition:opacity .6s ease 2.4s; opacity:0; }
+  #profile-reset { border:1px solid var(--line); background:var(--panel); color:var(--text); font:inherit; font-size:13px; font-weight:600; padding:8px 12px; border-radius:10px; cursor:pointer; }
+  button:focus-visible, input:focus-visible { outline:2px solid var(--user); outline-offset:2px; }
+  .sw input:focus-visible + .track { outline:2px solid var(--user); outline-offset:2px; }
+  @media (prefers-reduced-motion: reduce) { .sw .track, .sw .track::before, .profile-foot .msg.fade { transition:none; } }
 
   /* activity log */
   #log { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:8px 10px;
@@ -70,7 +101,7 @@
   .row .t { color:#5c6772; font-variant-numeric:tabular-nums; font-size:11px; flex:0 0 auto; }
   .row .tag { font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; flex:0 0 auto; }
   .row.user .tag{color:var(--user)} .row.assistant .tag{color:var(--assistant)}
-  .row.learn .tag{color:var(--assistant)} .row.status .tag{color:#6b7682}
+  .row.status .tag{color:#6b7682}
   .row.hud .tag{color:#9aa6b2}
   .row .msg { min-width:0; word-break:break-word; }
   .row.status .msg, .row.hud .msg { color:var(--muted); }
@@ -87,8 +118,9 @@
 </head>
 <body>
   <header>
-    <h1>Appliance Guide</h1>
-    <div class="meta"><span id="m-mode">—</span> · <span id="m-cam">camera —</span></div>
+    <h1>Wearable Task Guide</h1>
+    <div class="meta"><span id="m-mode">—</span> · <span id="m-cam">camera —</span><br />
+      <a id="runs-link" href="/webview/runs" hidden>Past runs →</a></div>
   </header>
 
   <div id="feedwrap">
@@ -107,21 +139,20 @@
     <div id="mode-note">Baseline: raw model output, default delivery.</div>
   </section>
 
-  <div id="consent">
-    <div class="t" id="consent-title">Permission request</div>
-    <div class="b" id="consent-text"></div>
-    <div class="row">
-      <button class="yes" id="consent-yes">Yes, that's okay</button>
-      <button class="no" id="consent-no">Not now</button>
-    </div>
-  </div>
-
   <section>
     <h2>Guide</h2>
-    <button id="done">✓ Done — next step</button>
     <div class="guiderow">
-      <button id="repeat">↻ Repeat</button>
       <button id="stoptask">■ Stop task</button>
+    </div>
+  </section>
+
+  <section aria-labelledby="profile-title">
+    <h2 id="profile-title">My profile</h2>
+    <p id="profile-note">Loading the profile…</p>
+    <div id="profile-body"></div>
+    <div class="profile-foot">
+      <span class="msg" id="profile-msg" role="status" aria-live="polite"></span>
+      <button id="profile-reset" hidden>Reset to default</button>
     </div>
   </section>
 
@@ -152,7 +183,7 @@
 
   // ---- activity log (SSE) ----
   const log = $('log');
-  const LABELS = { user:'You', assistant:'Guide', status:'System', hud:'HUD', learn:'Learned' };
+  const LABELS = { user:'You', assistant:'Guide', status:'System', hud:'HUD' };
   function pad(n){ return n<10 ? '0'+n : ''+n; }
   function clock(ts){ const d=new Date(ts||Date.now()); return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
   function addLog(e) {
@@ -190,9 +221,9 @@
       b.classList.toggle('active', b.dataset.mode === st.mode);
       b.disabled = !!st.switching;
     });
-    $('m-mode').textContent = st.mode + (st.granted ? ' · profile' : '');
+    $('m-mode').textContent = st.mode + (st.profileOn ? ' · profile' : '');
     $('mode-note').textContent = st.mode === 'toolkit'
-      ? (st.granted ? 'Profile: rate ' + st.rate + '× · ' + st.deliveryMode + (st.captionsMirror ? ' · captions' : '') : 'Waiting for profile consent…')
+      ? (st.profileOn ? 'Profile: rate ' + st.rate + '× · ' + st.deliveryMode + (st.captionsMirror ? ' · captions' : '') : 'No profile found — default delivery.')
       : 'Baseline: raw model output, default delivery.';
   }
   modeButtons.forEach((b) => {
@@ -203,42 +234,175 @@
     };
   });
 
-  // ---- consent card (POST /consent) ----
-  let consentId = null;
-  function renderConsent(cardState) {
-    const el = $('consent');
-    if (!cardState) { el.classList.remove('show'); consentId = null; return; }
-    if (consentId === cardState.id && el.classList.contains('show')) return;
-    consentId = cardState.id;
-    $('consent-title').textContent = cardState.kind === 'grant' ? 'Permission request' : 'Suggestion from your guide';
-    $('consent-text').textContent = cardState.body;
-    el.classList.add('show');
-  }
-  function answer(response) {
-    fetch(B + '/consent', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ response }) });
-    $('consent').classList.remove('show');
-  }
-  $('consent-yes').onclick = () => answer('accept');
-  $('consent-no').onclick = () => answer('declineOnce');
-
   // ---- guide controls ----
   function sendText(t) {
     fetch(B + '/say', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text: t }) });
   }
-  $('done').onclick = () => sendText('done');
-  $('repeat').onclick = () => sendText('repeat');
   $('stoptask').onclick = () => sendText('stop');
+
+  // ---- My profile: direct-manipulation editor (GET/POST /webview/profile) ----
+  // The server describes each need (label, help, kind, allowed values,
+  // provenance); this draws one control per need and posts one change at a
+  // time. Every answer is the fresh profile, which the section re-renders
+  // from; a failed write reverts the same way. DOM API only — no markup.
+  const SOURCE_LABELS = { 'setup-script': 'set up', 'onboarding-derived': 'onboarding', 'profile-editor': 'edited here' };
+  const profileBody = $('profile-body'), profileMsg = $('profile-msg');
+  let profile = null, profileSaving = 0, profileMsgTimer = null;
+
+  function formatValue(n) {
+    if (n.kind === 'range') return Number(n.value).toFixed(1) + (n.unit || '');
+    if (n.kind === 'toggle') return n.value ? 'on' : 'off';
+    if (n.kind === 'choice') { const o = (n.options || []).find((x) => x.value === n.value); return o ? o.label : String(n.value); }
+    return JSON.stringify(n.value);
+  }
+  function showProfileMsg(text, cls) {
+    clearTimeout(profileMsgTimer);
+    profileMsg.className = 'msg ' + cls; profileMsg.textContent = text;
+    if (cls === 'ok') profileMsgTimer = setTimeout(() => profileMsg.classList.add('fade'), 50);
+  }
+  async function postProfile(path, body, okText) {
+    profileSaving++;
+    try {
+      const r = await fetch(B + path, { method:'POST', headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+      profile = data; renderProfile(); showProfileMsg(okText(data), 'ok');
+    } catch (e) {
+      renderProfile(); showProfileMsg('Not saved: ' + (e && e.message ? e.message : e), 'err');
+    } finally { profileSaving--; }
+  }
+  function saveNeed(key, value, row) {
+    if (row) row.classList.add('busy');
+    return postProfile('/profile', { key, value }, (p) => {
+      const n = p.needs.find((x) => x.key === key);
+      return n ? 'Saved — ' + n.label + ': ' + formatValue(n) : 'Saved — removed';
+    });
+  }
+  async function loadProfile() {
+    if (profileSaving) return;
+    try {
+      const r = await fetch(B + '/profile');
+      const data = await r.json().catch(() => ({}));
+      profile = r.ok ? data : { unavailable: data.error || ('HTTP ' + r.status) };
+    } catch { profile = { unavailable: 'The app is not answering.' }; }
+    if (!profileSaving) renderProfile();
+  }
+  function mkControl(n, row) {
+    if (n.kind === 'toggle') {
+      const lab = document.createElement('label'); lab.className = 'sw';
+      const inp = document.createElement('input'); inp.type = 'checkbox'; inp.setAttribute('role', 'switch');
+      inp.checked = !!n.value; inp.setAttribute('aria-label', n.label); inp.dataset.focus = n.key + ':toggle';
+      inp.onchange = () => saveNeed(n.key, inp.checked, row);
+      const track = document.createElement('span'); track.className = 'track';
+      lab.append(inp, track); return lab;
+    }
+    if (n.kind === 'choice') {
+      const seg = document.createElement('div'); seg.className = 'seg'; seg.setAttribute('role', 'radiogroup'); seg.setAttribute('aria-label', n.label);
+      for (const o of n.options || []) {
+        const b = document.createElement('button'); b.type = 'button'; b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', o.value === n.value ? 'true' : 'false'); b.textContent = o.label; b.dataset.focus = n.key + ':opt:' + o.value;
+        b.onclick = () => { if (o.value !== n.value) saveNeed(n.key, o.value, row); };
+        seg.appendChild(b);
+      }
+      return seg;
+    }
+    if (n.kind === 'range') {
+      const inp = document.createElement('input'); inp.type = 'range'; inp.id = 'need-' + n.key;
+      inp.min = n.min; inp.max = n.max; inp.step = n.step; inp.value = n.value;
+      inp.setAttribute('aria-label', n.label); inp.dataset.focus = n.key + ':range';
+      inp.oninput = () => { const out = row.querySelector('.v'); if (out) out.textContent = Number(inp.value).toFixed(1) + (n.unit || ''); };
+      inp.onchange = () => saveNeed(n.key, Number(inp.value), row);
+      return inp;
+    }
+    return null;
+  }
+  // A re-render rebuilds the section; keyboard focus goes back to the same
+  // control (or the nearest one for the same need).
+  function restoreFocus(tag) {
+    if (!tag) return;
+    const find = (t) => profileBody.querySelector('[data-focus="' + t.replace(/"/g, '') + '"]');
+    const key = tag.split(':')[0] === 'add' ? tag.split(':')[1] : tag.split(':')[0];
+    const el = find(tag) || profileBody.querySelector('[data-focus^="' + key + ':"]') || find('add:' + key);
+    if (el) el.focus({ preventScroll: true });
+  }
+  function renderProfile() {
+    const p = profile;
+    const focused = document.activeElement && profileBody.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
+    profileBody.innerHTML = '';
+    const note = $('profile-note'), resetBtn = $('profile-reset');
+    if (!p || p.unavailable) { resetBtn.hidden = true; note.textContent = p && p.unavailable ? p.unavailable : 'Loading the profile…'; return; }
+    resetBtn.hidden = false;
+    note.textContent = '';
+    if (p.mode !== 'toolkit') note.textContent = 'Baseline ignores the profile — edits are saved, used once the guide is in Toolkit mode.';
+    else if (p.profileOn) { const b = document.createElement('span'); b.className = 'on'; b.textContent = 'In use'; note.append(b, ' — a change shapes the guide from its next turn.'); }
+    else note.textContent = 'No profile in the store yet. Add a need, or reset to default.';
+
+    for (const n of p.needs) {
+      const row = document.createElement('div'); row.className = 'need';
+      const h = document.createElement('div'); h.className = 'need-h';
+      const k = document.createElement('span'); k.className = 'k'; k.textContent = n.label; h.appendChild(k);
+      if (n.source) {
+        const s = document.createElement('span'); s.className = 'src' + (n.source === 'profile-editor' ? ' edited' : '');
+        s.textContent = SOURCE_LABELS[n.source] || n.source; s.title = (n.strength ? n.strength + ' · ' : '') + n.source; h.appendChild(s);
+      }
+      const ctl = mkControl(n, row);
+      if (n.kind === 'toggle') h.appendChild(ctl);
+      else { const v = document.createElement('output'); v.className = 'v'; v.textContent = formatValue(n); if (n.kind === 'range') v.setAttribute('for', 'need-' + n.key); h.appendChild(v); }
+      row.appendChild(h);
+      const help = document.createElement('div'); help.className = 'need-help';
+      const ht = document.createElement('span'); ht.textContent = n.help; help.appendChild(ht);
+      const rm = document.createElement('button'); rm.type = 'button'; rm.className = 'rm'; rm.textContent = 'remove';
+      rm.setAttribute('aria-label', 'Remove ' + n.label + ' from the profile'); rm.dataset.focus = n.key + ':rm';
+      rm.onclick = () => saveNeed(n.key, null, row);
+      help.appendChild(rm); row.appendChild(help);
+      if (ctl && n.kind !== 'toggle') row.appendChild(ctl);
+      profileBody.appendChild(row);
+    }
+    if (!p.needs.length) { const d = document.createElement('div'); d.className = 'need-help'; d.textContent = 'No needs set — the guide runs with defaults.'; profileBody.appendChild(d); }
+    if (p.available && p.available.length) {
+      const add = document.createElement('div'); add.className = 'add-row';
+      const lbl = document.createElement('span'); lbl.textContent = 'Add a need:'; add.appendChild(lbl);
+      for (const a of p.available) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'add-btn'; b.textContent = '+ ' + a.label; b.title = a.help; b.dataset.focus = 'add:' + a.key;
+        b.onclick = () => saveNeed(a.key, a.default, null);
+        add.appendChild(b);
+      }
+      profileBody.appendChild(add);
+    }
+    restoreFocus(focused);
+  }
+  // Reset confirms with a second tap (a webview may swallow window.confirm).
+  let resetArmed = null;
+  const resetBtn = $('profile-reset');
+  resetBtn.onclick = () => {
+    if (resetArmed) {
+      clearTimeout(resetArmed); resetArmed = null; resetBtn.textContent = "Reset to default";
+      postProfile('/profile/reset', null, () => "Reset to default");
+      return;
+    }
+    resetBtn.textContent = 'Tap again to reset';
+    showProfileMsg('This replaces every edit with her four onboarding needs.', '');
+    resetArmed = setTimeout(() => { resetArmed = null; resetBtn.textContent = "Reset to default"; showProfileMsg('', ''); }, 4000);
+  };
+  let profileStateKey = '';
+  function syncProfile(st) {
+    const key = st.mode + '|' + st.profileOn + '|' + JSON.stringify(st.needs || []);
+    if (key === profileStateKey) return;
+    profileStateKey = key; loadProfile();
+  }
+  loadProfile();
+  setInterval(() => { if (!document.activeElement || !profileBody.contains(document.activeElement)) loadProfile(); }, 5000);
 
   // ---- status polling ----
   async function poll() {
     try {
       const s = await (await fetch(B + '/status')).json();
       $('m-cam').textContent = (s.frames > 0) ? 'camera: live' : 'camera: no video';
+      $('runs-link').hidden = s.runs !== true;
       if (typeof s.active === 'boolean' && Date.now() - lastActiveAt > 1500) { active = s.active; renderPower(); }
       const st = s.state || {};
       if (Date.now() - lastModeAt > 1500) renderMode(st);
-      renderConsent(st.consentCard);
-      $('done').disabled = !(st.task && st.task.active && st.deliveryMode === 'stepwise');
+      syncProfile(st);
     } catch {}
   }
   poll(); setInterval(poll, 1500);

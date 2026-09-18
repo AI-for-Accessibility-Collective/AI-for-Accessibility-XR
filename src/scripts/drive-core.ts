@@ -10,7 +10,7 @@
 //
 // Both films run here end-to-end (docs/PLAN.md Phase 3 acceptance): toggle
 // Baseline/Toolkit on the rail, speak or type "help me start the washing
-// machine", answer the spoken consent, say "done" between steps.
+// machine", say "done" between steps.
 //
 // Stopping — each of these halts Gemini first, closes the video sources and
 // exits: the page's ■ Stop button, Ctrl-C here, the terminal closing, or
@@ -19,12 +19,10 @@
 // guard (engine/gemini-rest.ts) turns Gemini off if requests pile up.
 //
 //   --browser-cam  preselect the webcam        --rtmp  preselect the RTMP stream
-//   <file>         preselect that clip          --rehearsal  lift the weekly
-//                                               proposal cap (toolkit demo port)
+//   <file>         preselect that clip
 
 import { createInterface } from 'readline';
 import { existsSync, readdirSync } from 'fs';
-import { rm } from 'fs/promises';
 import { basename, extname, resolve } from 'path';
 import { config, demoPortConflict, requireGeminiKey } from '../config.ts';
 import { FrameStore, startFrameCapture, startFileFrameCapture } from '../transport/frames.ts';
@@ -40,17 +38,16 @@ import { VisionClient } from '../engine/vision.ts';
 import { createConversation } from '../engine/request-engine.ts';
 import { abortInFlightGemini, configureGeminiGuard, geminiHaltReason, haltGemini } from '../engine/gemini-rest.ts';
 import { createSpeaker, type SpeakerSink } from '../audio/speaker.ts';
-import { styleLine } from '../audio/gemini-style.ts';
-import { audioConsent } from '../toolkit/consent-audio.ts';
+import { styleLine } from '../toolkit-candidates/adapters/voice.ts';
 import { bootToolkit, type GuideToolkit } from '../toolkit/host.ts';
 import { createSession, type Session, type SessionDeps } from '../runtime/session.ts';
+import { createRunRecorder, type RunEventExtras, type RunEventRef } from '../runtime/run-recorder.ts';
 import type { Task } from '../skills/types.ts';
 import washingMachine from '../tasks/washing-machine.json';
 import bill from '../tasks/bill.json';
 
 requireGeminiKey();
 
-const rehearsal = process.argv.includes('--rehearsal');
 const browserCam = process.argv.includes('--browser-cam');
 const rtmpFlag = process.argv.includes('--rtmp');
 const videoFile = process.argv.slice(2).find((a) => !a.startsWith('--'));
@@ -69,7 +66,20 @@ let currentClipId: string | undefined;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
 let shuttingDown = false;
 
-const status = (text: string) => demo?.emit({ type: 'status', ts: Date.now(), text });
+// Past runs: every Start→pause take is kept on disk, same as on the glasses
+// (the pages that show them are served by the glasses server, /webview/runs).
+const runs = createRunRecorder({ dir: config.runsDir, keep: config.runsKeep });
+runs.recover();
+
+// Everything the page shows also goes into the running take, if there is one.
+function emit(e: { type: 'user' | 'assistant' | 'status' | 'hud'; text: string; ts: number }, delivery?: RunEventExtras): RunEventRef | null {
+  demo?.emit(e);
+  if (!runs.current() || !session) return null;
+  const st = session.state();
+  return runs.event(e, { ...delivery, frame: frames.latest(), mode: st.mode, task: st.task?.id ?? null });
+}
+
+const status = (text: string) => void emit({ type: 'status', ts: Date.now(), text });
 
 function stopProducer(): void {
   if (producer) {
@@ -83,12 +93,14 @@ function pauseGemini(reason: string): void {
   session?.setPaused(true);
   abortInFlightGemini(reason);
   demo?.update({ active: false });
+  runs.end('stopped');
 }
 
 function shutdown(reason: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   haltGemini(`the demo was stopped (${reason})`);
+  runs.end('shutdown');
   session?.setPaused(true);
   stopProducer();
   if (rtmpUp) stopRtmpServer();
@@ -147,48 +159,35 @@ function discoverClips(explicit?: string): { id: string; name: string; path: str
 const clips = discoverClips(videoFile);
 
 // ---- toolkit + session wiring -------------------------------------------
-// The consent IO closes over `session` (created after), so consent can speak
-// through the same sink and wait on the same utterance stream.
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // The demo speaker sink: every chunk becomes an 'assistant' event (the page
 // plays it through /tts) and the console shows it; delivery time is
 // approximated from words/rate so inter-chunk pauses land roughly right.
+// The page fetches each line's clip itself (speechFor, below); this remembers
+// which line of the take a text belongs to so the clip can be saved with it.
+const spokenLines = new Map<string, RunEventRef>();
 const sink: SpeakerSink = {
   async speak(text, meta) {
-    demo?.emit({ type: 'assistant', text, ts: Date.now() });
     const rate = meta.speakOptions.voice_settings?.speed ?? 1;
+    const line = emit(
+      { type: 'assistant', text, ts: Date.now() },
+      { slower: meta.slower, rate, deliveryMode: meta.render.delivery.mode },
+    );
+    if (line) spokenLines.set(text, line);
     console.log(`\n🔊 SPEAK${meta.slower ? ' (slower)' : ''} [${rate.toFixed(2)}×]: ${text}\n> `);
     const words = text.split(/\s+/).length;
     await sleep(Math.min(12_000, Math.round(((words / 2.8) * 1000) / rate)));
   },
 };
 
-const consentIO = {
-  speak: async (text: string) => {
-    await sink.speak(text, {
-      speakOptions: { voice_settings: { speed: session?.render().speech.rate ?? 1 } },
-      slower: false,
-      render: session!.render(),
-      stepId: null,
-      index: 0,
-      count: 1,
-    });
-  },
-  showCard: (card: Parameters<Session['setCard']>[0]) => session?.setCard(card),
-  nextUtterance: (timeoutMs: number) => (session ? session.waitAnswer(timeoutMs) : Promise.resolve(null)),
-};
-
 const tk: GuideToolkit = await bootToolkit({
   dataDir: config.appDataDir,
-  consent: audioConsent(consentIO),
   actingUser: config.actingUser,
-  rehearsal,
 });
 
 const speaker = createSpeaker(sink, undefined, {
-  onRepeatPattern: (info) => session?.onRepeatPattern(info),
   mapOpts: { filmMode: config.filmMode, voiceId: config.elevenVoiceId },
 });
 
@@ -205,34 +204,13 @@ const sessionDeps: SessionDeps = {
       temperature: config.llmTemperature,
     }),
   tk,
-  panel: { emit: (e) => demo?.emit(e) },
+  panel: { emit: (e) => void emit(e) },
   tasks: TASKS,
   vision,
   initialMode: config.guideMode,
 };
 session = createSession(sessionDeps);
 session.setPaused(true); // the page's Start switch begins
-
-// The retake button (docs/PLAN.md §3.7): wipe the app store, re-import the
-// fixture profile, drop back to a fresh pre-consent baseline.
-async function resetTake(): Promise<void> {
-  await rm(resolve(config.appDataDir), { recursive: true, force: true });
-  sessionDeps.tk = await bootToolkit({
-    dataDir: config.appDataDir,
-    consent: audioConsent(consentIO),
-    actingUser: config.actingUser,
-    rehearsal,
-  });
-  const fixture = new URL('../../test/fixtures/margaret.blob.json', import.meta.url);
-  if (existsSync(fixture)) {
-    const blob = JSON.parse(await Bun.file(fixture).text());
-    const res = await sessionDeps.tk.librarian.importProfileBlob(blob);
-    if (!res.ok) console.warn(`[drive-core] fixture import failed: ${res.reason}`);
-  }
-  await session!.setMode('baseline');
-  status('Take reset: store wiped, fixture profile re-imported, mode → baseline');
-  console.log('[drive-core] take reset');
-}
 
 // The page asks for audio once per spoken line, and every open tab asks on
 // its own; an identical line (a repeat, a second tab) reuses the clip rather
@@ -315,20 +293,29 @@ if (config.enableDemo) {
       onSay: (t) => void session!.onUtterance(t),
       sessionState: () => session!.state(),
       onSetMode: (m) => session!.setMode(m),
-      onConsent: (r) => session!.respondConsent(r),
+      // The profile editor writes to the same store handle the session reads.
+      profile: { toolkit: () => tk, onProfileChanged: () => session!.refreshProfile() },
       onSetActive: (active) => {
         if (active && geminiHaltReason()) {
           demo?.update({ active: false });
           status(`Gemini is off (${geminiHaltReason()}). Restart the demo — bun run demo — to use it again.`);
           return;
         }
-        if (active) session!.setPaused(false);
-        else pauseGemini('paused');
+        if (active) {
+          spokenLines.clear();
+          runs.start({ source: 'demo', mode: session!.state().mode });
+          session!.setPaused(false);
+        } else pauseGemini('paused');
       },
       // The laptop voice approximates the render with a Gemini style line
       // (docs/DESIGN.md §5.1 layer 2) — the rehearsal stand-in for ElevenLabs.
-      tts: (text) => speechFor(text),
-      onReset: resetTake,
+      tts: (text) =>
+        speechFor(text).then((out) => {
+          const line = spokenLines.get(text);
+          if (line && out) runs.attachAudio(line, out.audio);
+          spokenLines.delete(text);
+          return out;
+        }),
       onShutdown: () => shutdown('Stop button'),
       onPagesClosed: () => {
         pauseGemini('page closed');
@@ -348,8 +335,8 @@ if (config.enableDemo) {
   }
 }
 
-// Boot mode (the consent beat runs here when GUIDE_MODE=toolkit and the
-// store has no grant yet) — not awaited, so the readline + server come up.
+// Boot mode (toolkit mode reads the profile here) — not awaited, so the
+// readline + server come up.
 void session.setMode(config.guideMode);
 
 // Start STOPPED (no Gemini): begin on the preselected source (if any) — which
@@ -366,7 +353,7 @@ if (initialSource === 'none') {
   console.log(`[drive-core] pick a video source in the demo view (${clips.length} clip(s) found, or webcam / smartglass stream).`);
 }
 if (demo) console.log(`[drive-core] demo view: http://localhost:${config.demoPort}`);
-console.log(`[drive-core] mode=${config.guideMode} data=${config.appDataDir} user=${config.actingUser}${rehearsal ? ' (rehearsal: weekly cap lifted)' : ''}`);
+console.log(`[drive-core] mode=${config.guideMode} data=${config.appDataDir} user=${config.actingUser}`);
 console.log('[drive-core] TO STOP: the ■ Stop button on the page, Ctrl-C here, or `bun run stop` in any terminal.');
 console.log(
   `[drive-core] safety nets: closing the page pauses Gemini; ${config.autoPauseIdleMin} min without clicks or typing pauses it; ` +

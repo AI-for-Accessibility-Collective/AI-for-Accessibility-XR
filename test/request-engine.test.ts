@@ -57,16 +57,6 @@ describe('createConversation', () => {
     expect(bodies[1].contents.every((m: any) => m.parts.every((p: any) => p.text !== ''))).toBe(true);
   });
 
-  test('a new system instruction applies to later turns and keeps history', async () => {
-    const { f, bodies } = recorder(['One.', 'Two.']);
-    const c = createConversation(base, f);
-    await c.turn('a');
-    c.setSystemInstruction('SI with an updated profile block');
-    await c.turn('b');
-    expect(bodies[1].systemInstruction).toEqual({ parts: [{ text: 'SI with an updated profile block' }] });
-    expect(bodies[1].contents).toHaveLength(3);
-  });
-
   test('history is trimmed to maxHistoryTurns', async () => {
     const { f, bodies } = recorder(['1.', '2.', '3.']);
     const c = createConversation({ ...base, maxHistoryTurns: 1 }, f);

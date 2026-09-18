@@ -9,11 +9,10 @@
 //
 // Trimmed on copy from the old draft (no onboarding routes, no /gemini, no
 // noise meter, no skill-gate settings) and extended for the films:
-//   GET  /status    the session state (mode, granted needs, consent card, step)
+//   GET  /status    the session state (mode, the profile's needs, step)
 //   POST /mode      the A/B toggle — {mode: 'baseline'|'toolkit'}
-//   POST /consent   a consent-card tap — {response: 'accept'|'declineOnce'}
-//   POST /reset     the retake button
 //   POST /shutdown  the page's ■ Stop button — the host halts Gemini and exits
+//   GET/POST /profile, POST /profile/reset — the profile editor (profile-api.ts)
 //
 // Spending safety nets live here because only the server sees the pages: when
 // the last demo page has been closed for a few seconds (after at least one
@@ -26,6 +25,7 @@
 
 import type { FrameStore } from './frames.ts';
 import type { SessionEvent, SessionState, GuideMode } from '../runtime/session.ts';
+import { createProfileApi, type ProfileApiDeps } from './profile-api.ts';
 
 export type DemoEvent = SessionEvent;
 export type DemoSource = 'file' | 'webcam' | 'glasses' | 'rtmp' | 'none';
@@ -55,10 +55,11 @@ export interface DemoServerOptions {
   sessionState: () => SessionState;
   // The A/B toggle.
   onSetMode?: (mode: GuideMode) => void | Promise<void>;
-  // A consent-card tap.
-  onConsent?: (response: 'accept' | 'declineOnce') => void | Promise<void>;
   // Pause/resume all Gemini activity (the page's Start switch).
   onSetActive?: (active: boolean) => void;
+  // The profile editor: the store handle and the session refresh. Absent →
+  // the /profile routes answer 409 and the page's card stays read-only.
+  profile?: Pick<ProfileApiDeps, 'toolkit' | 'onProfileChanged'>;
   // Synthesize speech for the demo speaker (Gemini TTS, style line applied by
   // the caller from the live render). No-op if absent.
   tts?: (text: string) => Promise<{ audio: Uint8Array; mime: string } | null>;
@@ -68,8 +69,6 @@ export interface DemoServerOptions {
   currentClipId?: string;
   onSetSource?: (sel: SourceSelection) => void | Promise<void>;
   streamFps?: number;
-  // The retake button: wipe the app store and re-import the fixture profile.
-  onReset?: () => Promise<void> | void;
   // The page's ■ Stop button. The host halts Gemini and exits the process.
   onShutdown?: () => void;
   // Every demo page has been closed for pagesClosedGraceMs.
@@ -84,7 +83,7 @@ export interface DemoServerHandle {
   stop: () => void;
   emit: (e: DemoEvent) => void;
   update: (
-    partial: Partial<Pick<DemoServerOptions, 'onSay' | 'source' | 'currentClipId' | 'onSetActive' | 'onSetMode' | 'onConsent'>> & {
+    partial: Partial<Pick<DemoServerOptions, 'onSay' | 'source' | 'currentClipId' | 'onSetActive' | 'onSetMode'>> & {
       // Backend-initiated switch state (a safety net or the guard paused Gemini).
       active?: boolean;
     },
@@ -114,7 +113,6 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
   let source = opts.source;
   let onSetActive = opts.onSetActive;
   let onSetMode = opts.onSetMode;
-  let onConsent = opts.onConsent;
   const onSetSource = opts.onSetSource;
   let currentClipId = opts.currentClipId;
   let active = false; // start STOPPED; the page's Start switch resumes
@@ -203,6 +201,12 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
   }
+
+  const profileApi = createProfileApi({
+    toolkit: opts.profile?.toolkit ?? (() => null),
+    sessionState: opts.sessionState,
+    onProfileChanged: opts.profile?.onProfileChanged,
+  });
 
   const server = Bun.serve({
     port: opts.port,
@@ -311,7 +315,6 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
           currentClipId,
           active,
           canSetMode: !!onSetMode,
-          canReset: !!opts.onReset,
           canShutdown: !!opts.onShutdown,
           state: opts.sessionState(),
         });
@@ -341,28 +344,26 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
         return new Response(null, { status: 204 });
       }
 
-      // A consent-card tap from the panel.
-      if (path === '/consent' && req.method === 'POST') {
-        if (!onConsent) return new Response('consent not wired', { status: 409 });
+      // The profile editor. Editing counts as a human at the controls.
+      if (path === '/profile' && req.method === 'GET') {
+        const r = await profileApi.get();
+        return jsonResponse(r.body, r.status);
+      }
+      if (path === '/profile' && req.method === 'POST') {
         humanActed();
+        let body: unknown;
         try {
-          const body = (await req.json()) as { response?: unknown };
-          if (body.response !== 'accept' && body.response !== 'declineOnce') {
-            return new Response('bad response', { status: 400 });
-          }
-          await onConsent(body.response);
+          body = await req.json();
         } catch {
           return new Response('Bad JSON', { status: 400 });
         }
-        return new Response(null, { status: 204 });
+        const r = await profileApi.set(body);
+        return jsonResponse(r.body, r.status);
       }
-
-      // The retake button: wipe the app store, re-import the fixture profile.
-      if (path === '/reset' && req.method === 'POST') {
-        if (!opts.onReset) return new Response('reset not available', { status: 409 });
+      if (path === '/profile/reset' && req.method === 'POST') {
         humanActed();
-        await opts.onReset();
-        return new Response(null, { status: 204 });
+        const r = await profileApi.reset();
+        return jsonResponse(r.body, r.status);
       }
 
       // Typed/spoken utterance from the browser (stands in for the mic).
@@ -474,7 +475,6 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
       if (partial.currentClipId !== undefined) currentClipId = partial.currentClipId;
       if (partial.onSetActive) onSetActive = partial.onSetActive;
       if (partial.onSetMode) onSetMode = partial.onSetMode;
-      if (partial.onConsent) onConsent = partial.onConsent;
       if (typeof partial.active === 'boolean') active = partial.active;
     },
   };

@@ -52,6 +52,9 @@ export interface GenerateOpts {
   temperature: number;
   // Per-request deadline. Defaults: 30 s, or 90 s on the model-default rung.
   timeoutMs?: number;
+  // When set, the answer is streamed and this is called with the text so far
+  // as it grows. The resolved result is the same either way.
+  onText?: (soFar: string) => void;
 }
 
 export type ThinkingRung = 'budget0' | 'level-low' | 'model-default';
@@ -174,8 +177,44 @@ function failure(model: string, key: string, timeoutMs: number, what: string, e:
   return new Error(`gemini ${model} ${what}: ${redactKey(message, key)}`);
 }
 
+// One streamed response (server-sent events, one JSON chunk per `data:` line)
+// folded into the shape a plain response has, with the text so far reported
+// as each chunk lands.
+async function readStream(res: Response, onText: (soFar: string) => void): Promise<any> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  let text = '';
+  let last: any = null;
+  const take = (line: string): void => {
+    if (!line.startsWith('data:')) return;
+    const chunk = JSON.parse(line.slice(5).trim());
+    last = chunk;
+    const parts: any[] = chunk?.candidates?.[0]?.content?.parts ?? [];
+    const piece = parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('');
+    if (piece) {
+      text += piece;
+      onText(text);
+    }
+  };
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffered += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buffered.indexOf('\n')) >= 0) {
+      take(buffered.slice(0, nl).trim());
+      buffered = buffered.slice(nl + 1);
+    }
+  }
+  if (buffered.trim()) take(buffered.trim());
+  return { ...last, candidates: [{ ...last?.candidates?.[0], content: { parts: [{ text }] } }] };
+}
+
 export async function generateContent(opts: GenerateOpts, fetchImpl: typeof fetch = fetch): Promise<GenerateResult> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`;
+  const url = opts.onText
+    ? `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:streamGenerateContent?alt=sse`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`;
   let index = acceptedRung.get(opts.model) ?? 0;
   let firstRejection = '';
 
@@ -207,7 +246,7 @@ export async function generateContent(opts: GenerateOpts, fetchImpl: typeof fetc
       if (res.ok) {
         let data: any;
         try {
-          data = await res.json();
+          data = opts.onText ? await readStream(res, opts.onText) : await res.json();
         } catch (e) {
           throw failure(opts.model, opts.apiKey, timeoutMs, 'unreadable response', request.signal.reason ?? e);
         }

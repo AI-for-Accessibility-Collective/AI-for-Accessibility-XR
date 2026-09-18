@@ -1,0 +1,1006 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex" />
+<meta name="color-scheme" content="light dark" />
+<link rel="icon" href="data:," />
+<title>Past runs · Wearable Task Guide</title>
+<style>
+  /* One page, three views — the list, one run, and two runs side by side —
+     picked from the URL. Dark uses the control panel's palette; light uses the
+     demo page's toolkit-panel palette. Every stored string is untrusted: the
+     script builds DOM nodes and sets textContent, never innerHTML with data. */
+  :root {
+    --bg:#f5f6f8; --panel:#ffffff; --sunken:#eef0f3; --line:#dfe3e8; --line-strong:#c3cad3;
+    --text:#1d2330; --muted:#566070; --focus:#1d4ed8;
+    --user:#1d4ed8; --user-soft:#e6efff; --user-ink:#1a3fa6;
+    --assistant:#15803d; --assistant-soft:#e3f4e9; --assistant-ink:#0f5f2d;
+    --alert:#b3261e; --alert-soft:#fde8e6;
+    --btn-ink:#ffffff; --shadow:0 1px 2px rgba(16,24,40,.06), 0 4px 14px rgba(16,24,40,.05);
+    --skeleton:#e6e9ee; --skeleton-hi:#f3f5f8; --backdrop:rgba(10,14,20,.72);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0b0d10; --panel:#14181d; --sunken:#0f1317; --line:#232a31; --line-strong:#38424d;
+      --text:#e8edf2; --muted:#97a3b0; --focus:#7dbbff;
+      --user:#4ea1ff; --user-soft:rgba(78,161,255,.14); --user-ink:#9ccbff;
+      --assistant:#46d39a; --assistant-soft:rgba(70,211,154,.13); --assistant-ink:#7be3b8;
+      --alert:#ff8a80; --alert-soft:rgba(255,107,94,.14);
+      --btn-ink:#001022; --shadow:none;
+      --skeleton:#1a2027; --skeleton-hi:#232b34; --backdrop:rgba(0,0,0,.8);
+    }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  [hidden] { display:none !important; }
+  html { -webkit-text-size-adjust:100%; }
+  body {
+    margin:0; background:var(--bg); color:var(--text); min-height:100dvh;
+    font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  a { color:var(--user); text-underline-offset:2px; }
+  button { font:inherit; color:inherit; cursor:pointer; }
+  button:disabled { cursor:not-allowed; }
+  :focus-visible { outline:2px solid var(--focus); outline-offset:2px; border-radius:6px; }
+  .sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+  .skip { position:absolute; left:12px; top:-60px; z-index:50; background:var(--panel); color:var(--text); padding:10px 14px;
+    border:1px solid var(--line-strong); border-radius:10px; }
+  .skip:focus { top:12px; }
+
+  /* ---------- top bar ---------- */
+  .topbar { border-bottom:1px solid var(--line); background:var(--panel); }
+  .topbar-in, main { max-width:1080px; margin:0 auto; padding-left:max(16px, env(safe-area-inset-left)); padding-right:max(16px, env(safe-area-inset-right)); }
+  .topbar-in { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; flex-wrap:wrap; padding-top:8px; padding-bottom:8px; }
+  .brand { font-size:15px; font-weight:700; letter-spacing:-.2px; color:var(--text); text-decoration:none; display:flex; align-items:center; gap:8px; }
+  .brand span { color:var(--muted); font-weight:500; }
+  .topbar nav ul { list-style:none; display:flex; gap:4px; margin:0; padding:0; }
+  .topbar nav a { display:inline-block; padding:8px 10px; border-radius:8px; font-size:14px; font-weight:600; text-decoration:none; color:var(--muted); }
+  .topbar nav a:hover { color:var(--text); background:var(--sunken); }
+  .topbar nav a[aria-current="page"] { color:var(--text); background:var(--sunken); }
+  main { padding-top:24px; padding-bottom:120px; }
+  main.wide { max-width:1320px; }
+
+  h1 { font-size:clamp(22px, 4vw, 28px); line-height:1.2; letter-spacing:-.4px; margin:0; overflow-wrap:anywhere; }
+  .lede { color:var(--muted); margin:6px 0 0; max-width:62ch; font-size:15px; }
+  .crumb { display:inline-flex; align-items:center; gap:6px; font-size:14px; font-weight:600; text-decoration:none; margin-bottom:14px; padding:6px 0; }
+  .crumb:hover { text-decoration:underline; }
+  .crumb { white-space:nowrap; }
+  .crumb svg { width:16px; height:16px; flex:0 0 auto; }
+
+  /* ---------- badges + chips ---------- */
+  .badge { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; letter-spacing:.02em; padding:3px 9px;
+    border-radius:999px; border:1px solid transparent; white-space:nowrap; line-height:1.4; text-transform:none; }
+  .badge svg { width:12px; height:12px; flex:0 0 auto; }
+  .badge.baseline { background:var(--user-soft); color:var(--user-ink); border-color:color-mix(in srgb, var(--user) 35%, transparent); }
+  .badge.toolkit { background:var(--assistant-soft); color:var(--assistant-ink); border-color:color-mix(in srgb, var(--assistant) 35%, transparent); }
+  .badge.mixed { background:var(--sunken); color:var(--text); border-color:var(--line-strong); }
+  .badge.live { background:var(--alert-soft); color:var(--alert); border-color:color-mix(in srgb, var(--alert) 40%, transparent); }
+  .badge.live::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; animation:pulse 1.6s ease-in-out infinite; }
+  .badge.plain { background:transparent; color:var(--muted); border-color:var(--line-strong); font-weight:600; }
+  @keyframes pulse { 50% { opacity:.35; } }
+  .chip { display:inline-block; font-size:12px; font-weight:600; color:var(--muted); background:var(--sunken); border:1px solid var(--line);
+    padding:1px 8px; border-radius:6px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+
+  /* ---------- buttons ---------- */
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:8px 14px; border-radius:10px;
+    border:1px solid var(--line-strong); background:var(--panel); color:var(--text); font-size:14px; font-weight:650; text-decoration:none; }
+  .btn:hover:not(:disabled) { background:var(--sunken); }
+  .btn:disabled { opacity:.55; }
+  .btn svg { width:16px; height:16px; flex:0 0 auto; }
+  .btn.primary { background:var(--user); border-color:var(--user); color:var(--btn-ink); }
+  .btn.primary:hover:not(:disabled) { background:var(--user); filter:brightness(1.08); }
+  .btn.danger { color:var(--alert); border-color:color-mix(in srgb, var(--alert) 55%, transparent); }
+  .btn.danger:hover:not(:disabled) { background:var(--alert-soft); }
+  .btn.danger.solid { background:var(--alert); color:var(--btn-ink); border-color:var(--alert); }
+  .btn.danger.solid:hover:not(:disabled) { background:var(--alert); filter:brightness(1.08); }
+
+  /* ---------- list ---------- */
+  .list-head { display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:8px; }
+  .filters { display:flex; gap:6px; flex-wrap:wrap; margin:18px 0 4px; }
+  .filter { min-height:36px; padding:6px 14px; border-radius:999px; border:1px solid var(--line-strong); background:var(--panel);
+    font-size:14px; font-weight:600; color:var(--muted); }
+  .filter:hover { color:var(--text); }
+  .filter[aria-pressed="true"] { background:var(--text); color:var(--bg); border-color:var(--text); }
+  .filter .n { font-variant-numeric:tabular-nums; opacity:.8; margin-left:4px; font-weight:500; }
+  .day { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700; margin:28px 0 10px; }
+  .cards { list-style:none; margin:0; padding:0; display:grid; gap:12px; }
+  .card { display:grid; grid-template-columns:176px minmax(0,1fr); gap:16px; background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:12px; box-shadow:var(--shadow); position:relative; }
+  .card:has(.pick input:checked) { border-color:var(--user); box-shadow:0 0 0 1px var(--user); }
+  .thumb { display:block; aspect-ratio:16/9; width:100%; border-radius:9px; overflow:hidden; background:var(--sunken); border:1px solid var(--line); position:relative; }
+  .thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  .thumb .none { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; color:var(--muted); font-size:12px; }
+  .thumb .none svg { width:22px; height:22px; opacity:.7; }
+  .card-body { min-width:0; display:flex; flex-direction:column; gap:6px; }
+  .card-top { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .card h3 { margin:0; font-size:17px; line-height:1.3; font-weight:650; letter-spacing:-.1px; overflow-wrap:anywhere;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .card h3 a { color:var(--text); text-decoration:none; }
+  .card h3 a:hover { text-decoration:underline; }
+  .card h3 a::after { content:""; position:absolute; inset:0; border-radius:14px; }   /* whole card is the target */
+  .card h3 a:focus-visible { outline:none; }
+  .card h3 a:focus-visible::after { outline:2px solid var(--focus); outline-offset:2px; }
+  .facts { display:flex; flex-wrap:wrap; gap:2px 14px; color:var(--muted); font-size:14px; margin:0; padding:0; list-style:none; }
+  .facts li { white-space:nowrap; }
+  .facts strong { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+  .card-foot { margin-top:auto; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:6px 10px; padding-top:4px; }
+  .when { font-size:14px; color:var(--muted); white-space:nowrap; }
+  .pick { position:relative; z-index:1; display:inline-flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--muted);
+    padding:6px 10px; margin:-6px -4px -6px 0; border-radius:8px; cursor:pointer; user-select:none; }
+  .pick:hover { background:var(--sunken); color:var(--text); }
+  .pick input { width:18px; height:18px; accent-color:var(--user); margin:0; cursor:pointer; }
+  .pick:has(input:disabled) { opacity:.5; cursor:not-allowed; }
+  .pick:has(input:disabled) input { cursor:not-allowed; }
+
+  .comparebar { position:fixed; left:0; right:0; bottom:0; z-index:20; background:var(--panel); border-top:1px solid var(--line-strong);
+    padding:10px max(16px, env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    box-shadow:0 -8px 24px rgba(0,0,0,.12); }
+  .comparebar-in { max-width:1080px; margin:0 auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .comparebar p { margin:0; flex:1 1 180px; font-size:14px; }
+
+  /* ---------- states ---------- */
+  .state { text-align:center; background:var(--panel); border:1px dashed var(--line-strong); border-radius:16px; padding:40px 20px; margin-top:20px; }
+  .state svg { width:36px; height:36px; color:var(--muted); }
+  .state h2 { font-size:18px; margin:10px 0 6px; }
+  .state p { color:var(--muted); margin:0 auto 16px; max-width:52ch; font-size:15px; }
+  .state.error { border-style:solid; border-color:color-mix(in srgb, var(--alert) 45%, transparent); }
+  .state.error svg { color:var(--alert); }
+  .skel { background:linear-gradient(90deg, var(--skeleton) 25%, var(--skeleton-hi) 37%, var(--skeleton) 63%); background-size:400% 100%;
+    animation:shimmer 1.4s ease infinite; border-radius:8px; }
+  @keyframes shimmer { from { background-position:100% 50%; } to { background-position:0 50%; } }
+  .skel.line { height:14px; margin:8px 0; }
+  .toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:40; background:var(--text); color:var(--bg);
+    padding:10px 16px; border-radius:10px; font-size:14px; font-weight:600; max-width:calc(100vw - 32px); box-shadow:0 8px 28px rgba(0,0,0,.3); }
+
+  /* ---------- run header ---------- */
+  .run-head { background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:var(--shadow); }
+  .run-head .card-top { margin-bottom:8px; }
+  .run-head .facts { margin-top:10px; font-size:15px; gap:4px 18px; }
+  .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+  .notice { margin-top:14px; padding:10px 12px; border-radius:10px; background:var(--alert-soft); color:var(--text); font-size:14px; border:1px solid color-mix(in srgb, var(--alert) 30%, transparent); }
+  .notice.quiet { background:var(--sunken); border-color:var(--line); color:var(--muted); }
+
+  /* ---------- timeline ---------- */
+  .tl-tools { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:26px 0 10px; flex-wrap:wrap; }
+  .tl-tools h2 { font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700; margin:0; }
+  .linkbtn { background:none; border:0; padding:6px 4px; color:var(--user); font-size:14px; font-weight:600; text-decoration:underline; text-underline-offset:2px; }
+  .timeline { list-style:none; margin:0; padding:0; position:relative; }
+  .timeline::before { content:""; position:absolute; left:27px; top:8px; bottom:8px; width:2px; background:var(--line); }
+  .turn, .notes { position:relative; display:grid; grid-template-columns:56px minmax(0,1fr); gap:10px; padding:7px 0; scroll-margin:96px; }
+  .t { position:relative; z-index:1; justify-self:center; align-self:start; margin-top:12px; font-size:12px; font-weight:600; color:var(--muted);
+    background:var(--bg); padding:2px 0; width:56px; text-align:center; font-variant-numeric:tabular-nums; }
+  .bubble { background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--assistant); border-radius:12px; padding:12px 14px;
+    display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px 14px; transition:box-shadow .2s, border-color .2s; }
+  .turn.user .bubble { border-left-color:var(--user); background:color-mix(in srgb, var(--user-soft) 45%, var(--panel)); }
+  .turn.now .bubble { border-color:var(--assistant); box-shadow:0 0 0 2px var(--assistant); }
+  .who { grid-column:1; font-size:12px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; color:var(--assistant-ink); display:flex; align-items:center; gap:6px; }
+  .who svg { width:14px; height:14px; }
+  .turn.user .who { color:var(--user-ink); }
+  .said { grid-column:1; margin:0; font-size:16px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap; }
+  .turn.user .said { font-size:17px; }
+  .meta { grid-column:1; display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:4px; }
+  .play { display:inline-flex; align-items:center; gap:6px; min-height:34px; padding:4px 12px 4px 8px; border-radius:999px; border:1px solid var(--line-strong);
+    background:var(--panel); font-size:13px; font-weight:650; }
+  .play:hover { background:var(--sunken); }
+  .play svg { width:16px; height:16px; color:var(--assistant); }
+  .play[aria-pressed="true"] { background:var(--assistant-soft); border-color:var(--assistant); }
+  .noclip { font-size:12px; color:var(--muted); }
+  .shot { grid-column:2; grid-row:1 / span 3; align-self:start; width:128px; aspect-ratio:16/9; padding:0; border:1px solid var(--line); border-radius:8px;
+    overflow:hidden; background:var(--sunken); position:relative; display:block; }
+  .shot img { width:100%; height:100%; object-fit:cover; display:block; }
+  .shot:hover { border-color:var(--line-strong); }
+  .shot .zoom { position:absolute; right:4px; bottom:4px; background:rgba(0,0,0,.62); color:#fff; border-radius:6px; padding:3px; display:flex; }
+  .shot .zoom svg { width:12px; height:12px; }
+  .notes details { align-self:center; font-size:13px; color:var(--muted); min-width:0; }
+  .notes summary { cursor:pointer; padding:4px 6px; margin-left:-6px; border-radius:6px; width:fit-content; max-width:100%; list-style-position:inside; }
+  .notes summary:hover { color:var(--text); }
+  .notes ul { list-style:none; margin:4px 0 4px 2px; padding:0 0 0 12px; border-left:2px solid var(--line); display:grid; gap:3px; }
+  .notes li { overflow-wrap:anywhere; }
+  .notes li span { font-variant-numeric:tabular-nums; margin-right:8px; opacity:.85; }
+  .notes .t { margin-top:5px; font-weight:500; opacity:.8; }
+  .tl-empty { color:var(--muted); font-size:15px; padding:20px 0; }
+
+  /* ---------- compare ---------- */
+  .cmp-table-wrap { background:var(--panel); border:1px solid var(--line); border-radius:16px; box-shadow:var(--shadow); margin-top:18px; overflow:hidden; }
+  table.cmp { width:100%; border-collapse:collapse; font-size:15px; table-layout:fixed; }
+  .cmp caption { text-align:left; padding:14px 16px 4px; font-size:13px; color:var(--muted); caption-side:top; }
+  .cmp th, .cmp td { padding:10px 16px; text-align:left; vertical-align:top; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+  .cmp thead th { border-top:0; font-size:14px; font-weight:600; }
+  .cmp thead th .ab { display:block; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:700; margin-bottom:4px; }
+  .cmp thead th a { color:var(--text); display:block; margin-top:6px; font-weight:650; }
+  .cmp tbody th { font-weight:500; color:var(--muted); width:34%; }
+  .cmp tbody td { font-weight:650; font-variant-numeric:tabular-nums; }
+  .cmp tbody td small { display:block; font-weight:400; color:var(--muted); font-size:13px; }
+  .cmp-note { color:var(--muted); font-size:13px; margin:10px 2px 0; max-width:80ch; }
+  .cols { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:24px; margin-top:8px; align-items:start; }
+  .col > .tl-tools h2 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .cols .shot { width:96px; }
+
+  /* ---------- dialogs ---------- */
+  dialog { border:1px solid var(--line-strong); border-radius:16px; background:var(--panel); color:var(--text); padding:0; max-width:min(92vw, 460px); width:100%; }
+  dialog::backdrop { background:var(--backdrop); }
+  .dlg { padding:20px; }
+  .dlg h2 { margin:0 0 8px; font-size:18px; }
+  .dlg p { margin:0 0 8px; color:var(--muted); font-size:15px; overflow-wrap:anywhere; }
+  .dlg p strong { color:var(--text); }
+  .dlg .actions { justify-content:flex-end; }
+  .dlg .err { color:var(--alert); }
+  dialog.lightbox { max-width:min(96vw, 1100px); width:auto; background:#000; border-color:#333; color:#fff; }
+  .lightbox figure { margin:0; display:flex; flex-direction:column; }
+  .lightbox img { display:block; max-width:100%; max-height:calc(100dvh - 140px); width:auto; height:auto; object-fit:contain; margin:0 auto; background:#000; }
+  .lightbox figcaption { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px 10px 16px; font-size:14px; color:#d5dbe2; background:#111418; }
+  .lightbox .btn { background:#1c2128; color:#fff; border-color:#3a434e; }
+  .lightbox :focus-visible { outline-color:#7dbbff; }
+
+  @media (max-width: 860px) { .cols { grid-template-columns:1fr; } }
+  @media (max-width: 600px) {
+    main { padding-top:18px; }
+    .card { grid-template-columns:104px minmax(0,1fr); gap:12px; padding:10px; }
+    .card h3 { font-size:16px; }
+    .facts { font-size:13px; gap:2px 10px; }
+    .timeline::before { left:21px; }
+    .turn, .notes { grid-template-columns:44px minmax(0,1fr); gap:6px; }
+    .t { width:44px; font-size:11px; }
+    .bubble { padding:10px 12px; }
+    /* Narrow: the words get the full width; the frame sits small beside the label. */
+    .shot, .cols .shot { width:72px; grid-row:1; }
+    .who { align-self:center; }
+    .said, .meta { grid-column:1 / -1; }
+    .cmp th, .cmp td { padding:9px 10px; font-size:14px; }
+    .cmp tbody th { width:36%; }
+    .run-head { padding:14px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="/webview/runs">Wearable Task Guide <span>· Past runs</span></a>
+    <nav aria-label="Wearable Task Guide pages">
+      <ul>
+        <li><a href="/webview/runs" id="nav-runs">Past runs</a></li>
+        <li><a href="/webview">Control panel</a></li>
+        <li><a href="/webview/demo">Demo view</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main" tabindex="-1"></main>
+
+<div id="announce" class="sr-only" role="status" aria-live="polite"></div>
+
+<dialog id="lightbox" class="lightbox" aria-labelledby="lightbox-cap">
+  <figure>
+    <img id="lightbox-img" alt="" />
+    <figcaption><span id="lightbox-cap"></span><button class="btn" id="lightbox-close" type="button">Close</button></figcaption>
+  </figure>
+</dialog>
+
+<dialog id="confirm" aria-labelledby="confirm-title">
+  <div class="dlg">
+    <h2 id="confirm-title">Delete this run?</h2>
+    <p id="confirm-text"></p>
+    <p>Its camera images and audio clips are removed from the server. This can’t be undone.</p>
+    <p id="confirm-err" class="err" role="alert" hidden></p>
+    <div class="actions">
+      <button class="btn" id="confirm-cancel" type="button">Cancel</button>
+      <button class="btn danger solid" id="confirm-ok" type="button">Delete run</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+  const BASE = '/webview/runs';
+  const RUN_ID = /^\d{8}-\d{6}-[a-z0-9]{4}$/;
+  const FRAME_FILE = /^\d{1,6}\.jpg$/;
+  const AUDIO_FILE = /^\d{1,6}\.wav$/;
+  // The session's own "repeat" matcher (src/runtime/session.ts REPEAT_RE), so
+  // the count means exactly the requests the guide treated as a repeat.
+  const REPEAT_RE = /^(please )?((can|could|would) you( please)? )?(repeat( that| it)?|again|say (that|it) again|one more time|come again)[.?!]*$|^((sorry|pardon)( me)?|what was that)[.?!]*$/i;
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const main = document.getElementById('main');
+
+  // ---------- tiny DOM helpers (text only ever goes in as text nodes) ----------
+  function h(tag, attrs, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else el.setAttribute(k, v === true ? '' : String(v));
+    }
+    for (const kid of kids.flat()) {
+      if (kid == null || kid === false) continue;
+      el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+    }
+    return el;
+  }
+  // Icons are fixed strings from this file — never data.
+  const ICONS = {
+    play: '<path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/>',
+    pause: '<path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="1.5" fill="currentColor"/>',
+    back: '<path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+    download: '<path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 19h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    trash: '<path d="M5 7h14M10 7V5h4v2m-7 0l1 12h8l1-12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+    camera: '<path d="M4 8h3l1.5-2h7L17 8h3v11H4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/>',
+    zoom: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+    person: '<circle cx="12" cy="8" r="3.6" fill="currentColor"/><path d="M4.5 20c.8-4 3.8-6 7.5-6s6.7 2 7.5 6z" fill="currentColor"/>',
+    guide: '<path d="M4 5h16v11H9l-5 4z" fill="currentColor"/>',
+    alert: '<path d="M12 4l9 16H3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 10v4.5M12 17.3v.2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+    inbox: '<path d="M4 13l2.5-8h11L20 13v6H4zm0 0h5l1 2.5h4l1-2.5h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+    compare: '<path d="M12 3v18M5 7h4v10H5zM15 7h4v10h-4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>',
+  };
+  function icon(name) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    svg.innerHTML = ICONS[name] || '';
+    return svg;
+  }
+
+  let announceTimer = 0;
+  function announce(text) {
+    const live = document.getElementById('announce');
+    live.textContent = '';
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(() => { live.textContent = text; }, 60);
+  }
+  function toast(text) {
+    announce(text);
+    const el = h('div', { class: 'toast', 'aria-hidden': 'true' }, text);
+    document.body.append(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  // ---------- formatting ----------
+  const pad = (n) => (n < 10 ? '0' + n : '' + n);
+  function offset(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    const hrs = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+    return '+' + (hrs ? hrs + ':' + pad(m) : m) + ':' + pad(s % 60);
+  }
+  function duration(ms) {
+    if (ms == null) return '—';
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return s + ' s';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + ' min ' + pad(s % 60) + ' s';
+    return Math.floor(m / 60) + ' h ' + pad(m % 60) + ' min';
+  }
+  function relative(ts) {
+    const s = Math.round((Date.now() - ts) / 1000);
+    if (s < 45) return 'just now';
+    if (s < 3600) return Math.max(1, Math.round(s / 60)) + ' min ago';
+    if (s < 86400) return Math.round(s / 3600) + ' h ago';
+    const d = Math.round(s / 86400);
+    return d < 30 ? d + ' d ago' : '';
+  }
+  const timeFmt = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+  const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+  const dayYearFmt = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const shortFmt = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  function dayKey(ts) { const d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function dayLabel(ts) {
+    const today = new Date();
+    const yesterday = new Date(Date.now() - 86400000);
+    if (dayKey(ts) === dayKey(today)) return 'Today';
+    if (dayKey(ts) === dayKey(yesterday)) return 'Yesterday';
+    return (new Date(ts).getFullYear() === today.getFullYear() ? dayFmt : dayYearFmt).format(ts);
+  }
+  function timeEl(ts, text) { return h('time', { datetime: new Date(ts).toISOString() }, text); }
+  function words(text) { const t = String(text || '').trim(); return t ? t.split(/\s+/).length : 0; }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  function rateLabel(rate) { return (Math.round(rate * 100) / 100).toString() + '×'; }
+
+  // ---------- what a run is called, and its mode ----------
+  function taskName(id) { return String(id).replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase()); }
+  function runTitle(run) {
+    if (run.firstSaid) return '“' + run.firstSaid + '”';
+    if (run.task) return taskName(run.task);
+    return 'Run with nothing said yet';
+  }
+  function modeOf(run) {
+    const modes = Array.isArray(run.modes) && run.modes.length ? run.modes : [run.mode];
+    return modes.length > 1 ? 'mixed' : modes[0] === 'toolkit' ? 'toolkit' : 'baseline';
+  }
+  function modeBadge(run) {
+    const m = modeOf(run);
+    if (m === 'mixed') {
+      const names = run.modes.map((x) => (x === 'toolkit' ? 'Toolkit' : 'Baseline')).join(' → ');
+      return h('span', { class: 'badge mixed', title: 'The mode was switched during this run' }, 'Mixed: ' + names);
+    }
+    return h('span', { class: 'badge ' + m }, m === 'toolkit' ? 'Toolkit' : 'Baseline');
+  }
+  function liveBadge() { return h('span', { class: 'badge live' }, 'Live now'); }
+  function sourceBadge(run) { return h('span', { class: 'badge plain' }, run.source === 'demo' ? 'Demo page' : 'Glasses'); }
+  function endNote(run) {
+    if (run.endReason === 'interrupted') return 'The server stopped before this run was ended, so its length is up to the last thing recorded.';
+    if (run.endReason === 'disconnected') return 'This run ended because the phone disconnected.';
+    if (run.endReason === 'shutdown') return 'This run ended because the server was shut down.';
+    return '';
+  }
+
+  // ---------- fetching, with errors a person can act on ----------
+  class LoadError extends Error { constructor(kind, message) { super(message); this.kind = kind; } }
+  async function getJson(path) {
+    let res;
+    try {
+      res = await fetch(BASE + path, { headers: { Accept: 'application/json' }, cache: 'no-store', credentials: 'same-origin' });
+    } catch {
+      throw new LoadError('network', 'Couldn’t reach the server. Check the connection and try again.');
+    }
+    if (res.status === 401) throw new LoadError('auth', 'The password wasn’t accepted, or the sign-in was cancelled. Reload the page to sign in again.');
+    if (res.status === 404) throw new LoadError('missing', 'This run isn’t on the server any more. It may have been deleted, or replaced by newer runs.');
+    if (res.status === 429) throw new LoadError('auth', 'Too many wrong passwords. Wait a minute, then reload the page.');
+    if (!res.ok) throw new LoadError('server', 'The server answered with an error (' + res.status + ').');
+    try { return await res.json(); } catch { throw new LoadError('server', 'The server sent something this page couldn’t read.'); }
+  }
+  function errorState(err, retry) {
+    const kind = err && err.kind;
+    const title = kind === 'missing' ? 'Run not found' : kind === 'auth' ? 'Sign-in needed' : kind === 'network' ? 'Can’t reach the server' : 'Something went wrong';
+    const box = h('div', { class: 'state error', role: 'alert' }, icon('alert'), h('h2', {}, title), h('p', {}, (err && err.message) || 'Unknown error.'));
+    const row = h('div', { class: 'actions', style: 'justify-content:center;margin-top:0' });
+    if (kind === 'auth') row.append(h('button', { class: 'btn primary', type: 'button', onclick: () => location.reload() }, 'Reload and sign in'));
+    else if (kind !== 'missing') row.append(h('button', { class: 'btn primary', type: 'button', onclick: retry }, 'Try again'));
+    if (kind === 'missing' || location.pathname.replace(/\/$/, '') !== BASE) row.append(h('a', { class: 'btn', href: BASE }, 'All runs'));
+    box.append(row);
+    return box;
+  }
+
+  // ---------- one audio player for the whole page: one clip at a time ----------
+  const player = (() => {
+    const audio = new Audio();
+    audio.preload = 'none';
+    let cur = null;
+    function mark(item, on) {
+      item.btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      item.btn.replaceChildren(icon(on ? 'pause' : 'play'), on ? 'Pause' : 'Play');
+      item.turn.classList.toggle('now', on);
+    }
+    function finish(finished) {
+      if (!cur) return;
+      const item = cur;
+      cur = null;
+      mark(item, false);
+      if (item.onDone) item.onDone(finished);
+    }
+    audio.addEventListener('ended', () => finish(true));
+    audio.addEventListener('error', () => { if (cur) { toast('That clip couldn’t be played.'); finish(false); } });
+    return {
+      isPlaying: (btn) => !!cur && cur.btn === btn,
+      start(url, btn, turn, onDone) {
+        if (cur) { const old = cur; cur = null; audio.pause(); mark(old, false); }
+        cur = { btn, turn, onDone };
+        mark(cur, true);
+        audio.src = url;
+        const p = audio.play();
+        if (p && p.catch) p.catch(() => { if (cur && cur.btn === btn) { toast('That clip couldn’t be played.'); finish(false); } });
+      },
+      stop() { audio.pause(); finish(false); },
+      busy: () => !!cur,
+    };
+  })();
+
+  // "Play all" walks a run's clips in order; any other play action ends it.
+  let sequence = null;
+  function endSequence() {
+    if (!sequence) return;
+    const s = sequence;
+    sequence = null;
+    s.btn.replaceChildren(icon('play'), 'Play all');
+    s.btn.setAttribute('aria-pressed', 'false');
+  }
+  function playAll(items, btn) {
+    if (sequence && sequence.btn === btn) { endSequence(); player.stop(); return; }
+    endSequence();
+    const me = (sequence = { btn });
+    btn.replaceChildren(icon('stop'), 'Stop');
+    btn.setAttribute('aria-pressed', 'true');
+    const step = (i) => {
+      if (sequence !== me) return;
+      if (i >= items.length) { endSequence(); announce('Finished playing the guide’s lines.'); return; }
+      const it = items[i];
+      it.turn.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' });
+      player.start(it.url, it.btn, it.turn, (finished) => {
+        if (sequence !== me) return;
+        if (finished) step(i + 1); else endSequence();
+      });
+    };
+    step(0);
+  }
+
+  // ---------- lightbox ----------
+  const lightbox = document.getElementById('lightbox');
+  let lightboxOpener = null;
+  function openLightbox(url, caption, opener) {
+    lightboxOpener = opener;
+    const img = document.getElementById('lightbox-img');
+    img.src = url;
+    img.alt = caption;
+    document.getElementById('lightbox-cap').textContent = caption;
+    lightbox.showModal();
+    document.getElementById('lightbox-close').focus();
+  }
+  document.getElementById('lightbox-close').addEventListener('click', () => lightbox.close());
+  lightbox.addEventListener('click', (e) => { if (e.target === lightbox) lightbox.close(); });
+  lightbox.addEventListener('close', () => {
+    document.getElementById('lightbox-img').removeAttribute('src');
+    if (lightboxOpener && lightboxOpener.isConnected) lightboxOpener.focus();
+    lightboxOpener = null;
+  });
+
+  // ---------- the timeline (shared by the run page and the comparison) ----------
+  function buildTimeline(run, events) {
+    const clips = [];
+    const list = h('ol', { class: 'timeline' });
+    const seen = run.source === 'demo' ? 'What the camera saw at ' : 'What the glasses saw at ';
+    const mixed = modeOf(run) === 'mixed';
+    let notes = null; // the <ul> of the status group being filled
+
+    for (const e of events) {
+      const at = offset(e.ts - run.startedAt);
+      if (e.type !== 'user' && e.type !== 'assistant') {
+        if (!notes) {
+          notes = h('ul', {});
+          const summary = h('summary', {});
+          const li = h('li', { class: 'notes' }, h('span', { class: 't' }, at), h('details', {}, summary, notes));
+          li._summary = summary;
+          li._notes = notes;
+          list.append(li);
+        }
+        notes.append(h('li', {}, h('span', {}, at), e.text));
+        continue;
+      }
+      notes = null;
+      const isUser = e.type === 'user';
+      const turn = h('li', { class: 'turn ' + (isUser ? 'user' : 'guide') });
+      const bubble = h('div', { class: 'bubble' });
+      bubble.append(
+        h('div', { class: 'who' }, icon(isUser ? 'person' : 'guide'), isUser ? 'You said' : 'Guide'),
+        h('p', { class: 'said' }, e.text),
+      );
+      if (isUser && typeof e.audio === 'string' && AUDIO_FILE.test(e.audio)) {
+        // What the glasses microphone picked up for this turn — the quickest
+        // way to tell a mishearing from a bad recording. Not part of "Play all".
+        const meta = h('div', { class: 'meta' });
+        const url = BASE + '/' + run.id + '/audio/' + e.audio;
+        const btn = h('button', { class: 'play', type: 'button', 'aria-pressed': 'false', 'aria-label': 'Play what the microphone heard at ' + at }, icon('play'), 'What the mic heard');
+        btn.addEventListener('click', () => {
+          const wasPlaying = player.isPlaying(btn);
+          endSequence();
+          if (wasPlaying) player.stop(); else player.start(url, btn, turn, null);
+        });
+        meta.append(btn);
+        bubble.append(meta);
+      }
+      if (!isUser) {
+        const meta = h('div', { class: 'meta' });
+        if (typeof e.audio === 'string' && AUDIO_FILE.test(e.audio)) {
+          const url = BASE + '/' + run.id + '/audio/' + e.audio;
+          const btn = h('button', { class: 'play', type: 'button', 'aria-pressed': 'false', 'aria-label': 'Play the guide’s line from ' + at }, icon('play'), 'Play');
+          btn.addEventListener('click', () => {
+            const wasPlaying = player.isPlaying(btn);
+            endSequence();
+            if (wasPlaying) player.stop(); else player.start(url, btn, turn, null);
+          });
+          meta.append(btn);
+          clips.push({ url, btn, turn });
+        } else {
+          meta.append(h('span', { class: 'noclip' }, 'No saved audio'));
+        }
+        if (typeof e.rate === 'number') meta.append(h('span', { class: 'chip', title: 'Speech rate' }, rateLabel(e.rate)));
+        if (e.deliveryMode) meta.append(h('span', { class: 'chip', title: 'How the answer was delivered' }, e.deliveryMode));
+        if (e.slower) meta.append(h('span', { class: 'chip', title: 'Said again, more slowly' }, 'slower repeat'));
+        meta.append(h('span', { class: 'chip', title: 'Length of this line' }, plural(words(e.text), 'word', 'words')));
+        if (mixed && e.mode) meta.append(h('span', { class: 'chip' }, e.mode));
+        bubble.append(meta);
+      }
+      if (typeof e.frame === 'string' && FRAME_FILE.test(e.frame)) {
+        const url = BASE + '/' + run.id + '/frames/' + e.frame;
+        const alt = seen + at;
+        const shot = h('button', { class: 'shot', type: 'button', 'aria-label': alt + ' — open larger' },
+          h('img', { src: url, alt, loading: 'lazy', decoding: 'async', width: 320, height: 180 }),
+          h('span', { class: 'zoom' }, icon('zoom')));
+        shot.addEventListener('click', () => openLightbox(url, alt, shot));
+        bubble.append(shot);
+      }
+      turn.append(h('span', { class: 't' }, h('span', { class: 'sr-only' }, 'At '), at), bubble);
+      list.append(turn);
+    }
+    for (const li of list.querySelectorAll('.notes')) {
+      const n = li._notes.children.length;
+      li._summary.textContent = plural(n, 'status update', 'status updates');
+    }
+    return { list, clips };
+  }
+
+  function timelineSection(run, events, headingLevel, headingKids) {
+    const { list, clips } = buildTimeline(run, events);
+    const playBtn = h('button', { class: 'btn', type: 'button', 'aria-pressed': 'false', disabled: clips.length === 0 }, icon('play'), 'Play all');
+    if (!clips.length) playBtn.title = 'This run has no saved audio clips';
+    playBtn.addEventListener('click', () => playAll(clips, playBtn));
+    const allNotes = () => Array.from(list.querySelectorAll('details'));
+    const notesBtn = h('button', { class: 'linkbtn', type: 'button', 'aria-expanded': 'false' }, 'Show status updates');
+    notesBtn.addEventListener('click', () => {
+      const open = notesBtn.getAttribute('aria-expanded') !== 'true';
+      allNotes().forEach((d) => { d.open = open; });
+      notesBtn.setAttribute('aria-expanded', String(open));
+      notesBtn.textContent = open ? 'Hide status updates' : 'Show status updates';
+    });
+    const tools = h('div', { class: 'tl-tools' }, h(headingLevel, {}, headingKids),
+      h('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, allNotes().length ? notesBtn : null, playBtn));
+    const turns = events.filter((e) => e.type === 'user' || e.type === 'assistant').length;
+    return [tools, turns ? list : h('div', {}, h('p', { class: 'tl-empty' }, 'Nothing was said in this run yet.'), list)];
+  }
+
+  // ---------- list page ----------
+  const picked = []; // run ids ticked for comparison, oldest tick first
+  let filter = 'all';
+  let listTimer = 0;
+
+  function runFacts(run) {
+    const live = run.endedAt == null;
+    const c = run.counts || {};
+    return h('ul', { class: 'facts' },
+      h('li', {}, h('strong', {}, live ? duration(Date.now() - run.startedAt) : duration(run.durationMs)), live ? ' so far' : ''),
+      h('li', {}, h('strong', {}, c.userTurns || 0), ' ', (c.userTurns === 1 ? 'turn' : 'turns')),
+      h('li', {}, h('strong', {}, c.guideLines || 0), ' guide ', (c.guideLines === 1 ? 'line' : 'lines')));
+  }
+  function whenEl(run) {
+    const rel = relative(run.startedAt);
+    return h('span', { class: 'when' }, timeEl(run.startedAt, timeFmt.format(run.startedAt)), rel ? ' · ' + rel : '');
+  }
+
+  function runCard(run, refresh) {
+    const href = BASE + '/' + run.id;
+    const live = run.endedAt == null;
+    const thumb = h('a', { class: 'thumb', href, tabindex: '-1', 'aria-hidden': 'true' });
+    if (typeof run.thumb === 'string' && FRAME_FILE.test(run.thumb)) {
+      thumb.append(h('img', { src: href + '/frames/' + run.thumb, alt: '', loading: 'lazy', decoding: 'async', width: 320, height: 180 }));
+    } else {
+      thumb.append(h('span', { class: 'none' }, icon('camera'), 'No camera image'));
+    }
+    const box = h('input', { type: 'checkbox', checked: picked.includes(run.id), disabled: !picked.includes(run.id) && picked.length >= 2 });
+    box.addEventListener('change', () => {
+      const i = picked.indexOf(run.id);
+      if (box.checked && i < 0) picked.push(run.id);
+      if (!box.checked && i >= 0) picked.splice(i, 1);
+      refresh();
+    });
+    const title = runTitle(run);
+    const pick = h('label', { class: 'pick', title: box.disabled ? 'Two runs are already picked — untick one first' : null }, box, 'Compare',
+      h('span', { class: 'sr-only' }, ' ' + title + ', ' + timeFmt.format(run.startedAt)));
+    return h('li', {},
+      h('article', { class: 'card' }, thumb,
+        h('div', { class: 'card-body' },
+          h('div', { class: 'card-top' }, live ? liveBadge() : null, modeBadge(run), sourceBadge(run)),
+          h('h3', {}, h('a', { href }, title)),
+          run.firstSaid && run.task ? h('div', { class: 'when' }, 'Task: ' + taskName(run.task)) : null,
+          runFacts(run),
+          h('div', { class: 'card-foot' }, whenEl(run), pick))));
+  }
+
+  function compareHref() {
+    return BASE + '/compare?a=' + encodeURIComponent(picked[0]) + '&b=' + encodeURIComponent(picked[1]);
+  }
+
+  function renderList(data) {
+    const runs = (data.runs || []).filter((r) => r && RUN_ID.test(r.id));
+    for (let i = picked.length - 1; i >= 0; i--) if (!runs.some((r) => r.id === picked[i])) picked.splice(i, 1);
+    const refresh = () => renderList(data);
+    const focusKey = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : null;
+
+    const count = (m) => runs.filter((r) => m === 'all' || modeOf(r) === m || (modeOf(r) === 'mixed' && r.modes.includes(m))).length;
+    const chips = h('div', { class: 'filters', role: 'group', 'aria-label': 'Filter runs by mode' },
+      [['all', 'All'], ['baseline', 'Baseline'], ['toolkit', 'Toolkit']].map(([key, label]) => {
+        const b = h('button', { class: 'filter', type: 'button', 'aria-pressed': String(filter === key), 'data-key': 'filter-' + key }, label, h('span', { class: 'n' }, count(key)));
+        b.addEventListener('click', () => { filter = key; refresh(); announce(plural(count(key), 'run', 'runs') + ' shown'); });
+        return b;
+      }));
+
+    const head = h('div', { class: 'list-head' },
+      h('div', {}, h('h1', {}, 'Past runs'),
+        h('p', { class: 'lede' }, 'Every take from Start to Stop: what was said, what the guide answered, and what the camera saw. Tick two runs to compare them side by side.')));
+    const out = [head];
+
+    if (!runs.length) {
+      out.push(h('div', { class: 'state' }, icon('inbox'), h('h2', {}, 'No runs yet'),
+        h('p', {}, 'Press Start on the phone app or the demo page, talk to the guide, then press Stop. The take shows up here with its conversation, camera frames and audio.'),
+        h('p', {}, 'A Start followed by Stop with nothing said isn’t kept.'),
+        h('a', { class: 'btn', href: '/webview' }, 'Open the control panel')));
+    } else {
+      out.push(chips);
+      const shown = runs.filter((r) => filter === 'all' || modeOf(r) === filter || (modeOf(r) === 'mixed' && r.modes.includes(filter)));
+      if (!shown.length) {
+        out.push(h('div', { class: 'state' }, icon('inbox'), h('h2', {}, 'No ' + (filter === 'toolkit' ? 'Toolkit' : 'Baseline') + ' runs yet'),
+          h('p', {}, 'Switch the mode on the phone app or the control panel, then record a take.'),
+          h('button', { class: 'btn', type: 'button', onclick: () => { filter = 'all'; refresh(); } }, 'Show all runs')));
+      }
+      let group = null, key = '';
+      for (const run of shown) {
+        const k = dayKey(run.startedAt);
+        if (k !== key) {
+          key = k;
+          const id = 'day-' + k;
+          group = h('ul', { class: 'cards', 'aria-labelledby': id });
+          out.push(h('section', {}, h('h2', { class: 'day', id }, dayLabel(run.startedAt)), group));
+        }
+        group.append(runCard(run, refresh));
+      }
+    }
+
+    if (picked.length) {
+      const ready = picked.length === 2;
+      const go = ready
+        ? h('a', { class: 'btn primary', href: compareHref(), 'data-key': 'compare-go' }, icon('compare'), 'Compare these two')
+        : h('button', { class: 'btn primary', type: 'button', disabled: true }, icon('compare'), 'Compare');
+      out.push(h('div', { class: 'comparebar', role: 'region', 'aria-label': 'Compare runs' },
+        h('div', { class: 'comparebar-in' },
+          h('p', {}, ready ? 'Two runs picked.' : 'One run picked — tick one more to compare.'),
+          h('button', { class: 'btn', type: 'button', 'data-key': 'compare-clear', onclick: () => { picked.length = 0; refresh(); announce('Selection cleared'); } }, 'Clear'),
+          go)));
+    }
+
+    // Re-rendering replaces nodes; put keyboard focus back where it was.
+    const active = document.activeElement;
+    const pickedId = active && active.type === 'checkbox' ? active.closest('li') && active.closest('li').querySelector('h3 a').getAttribute('href') : null;
+    main.className = '';
+    main.replaceChildren(...out);
+    if (pickedId) {
+      const again = Array.from(main.querySelectorAll('h3 a')).find((a) => a.getAttribute('href') === pickedId);
+      const box = again && again.closest('li').querySelector('input');
+      if (box && !box.disabled) box.focus();
+    } else if (focusKey) {
+      const again = main.querySelector('[data-key="' + focusKey + '"]');
+      if (again) again.focus();
+    }
+
+    // Keep a live run's numbers moving without anyone reloading.
+    clearTimeout(listTimer);
+    if (runs.some((r) => r.endedAt == null)) {
+      listTimer = setTimeout(async () => {
+        if (document.activeElement && document.activeElement.type === 'checkbox') return;
+        try { renderList(await getJson('/api/list')); } catch {}
+      }, 10000);
+    }
+  }
+
+  function listSkeleton() {
+    const cards = h('ul', { class: 'cards', 'aria-hidden': 'true' });
+    for (let i = 0; i < 3; i++) {
+      cards.append(h('li', {}, h('div', { class: 'card' }, h('div', { class: 'thumb skel' }),
+        h('div', {}, h('div', { class: 'skel line', style: 'width:30%' }), h('div', { class: 'skel line', style: 'width:75%;height:18px' }), h('div', { class: 'skel line', style: 'width:50%' })))));
+    }
+    return [h('h1', {}, 'Past runs'), h('p', { class: 'lede' }, 'Loading runs…'), h('div', { style: 'margin-top:28px' }, cards)];
+  }
+
+  async function showList() {
+    document.getElementById('nav-runs').setAttribute('aria-current', 'page');
+    main.setAttribute('aria-busy', 'true');
+    main.replaceChildren(...listSkeleton());
+    try {
+      const data = await getJson('/api/list');
+      renderList(data);
+      const flash = new URLSearchParams(location.search).get('deleted');
+      if (flash != null) {
+        history.replaceState(null, '', BASE);
+        toast('Run deleted.');
+      } else {
+        announce(plural((data.runs || []).length, 'run', 'runs') + ' loaded');
+      }
+    } catch (err) {
+      main.replaceChildren(h('h1', {}, 'Past runs'), errorState(err, showList));
+    } finally {
+      main.removeAttribute('aria-busy');
+    }
+  }
+
+  // ---------- run page ----------
+  function runSkeleton() {
+    return [h('a', { class: 'crumb', href: BASE }, icon('back'), 'All runs'),
+      h('div', { class: 'run-head', 'aria-hidden': 'true' }, h('div', { class: 'skel line', style: 'width:25%' }), h('div', { class: 'skel line', style: 'width:70%;height:26px' }), h('div', { class: 'skel line', style: 'width:55%' })),
+      h('p', { class: 'sr-only' }, 'Loading run…')];
+  }
+
+  function askDelete(run, opener) {
+    const dlg = document.getElementById('confirm');
+    const ok = document.getElementById('confirm-ok');
+    const cancel = document.getElementById('confirm-cancel');
+    const err = document.getElementById('confirm-err');
+    const text = document.getElementById('confirm-text');
+    text.replaceChildren('You’re about to delete ', h('strong', {}, runTitle(run)), ' — the ' + (modeOf(run) === 'mixed' ? 'mixed-mode' : modeOf(run) === 'toolkit' ? 'Toolkit' : 'Baseline') + ' run from ' + shortFmt.format(run.startedAt) + '.');
+    err.hidden = true;
+    ok.disabled = false;
+    ok.textContent = 'Delete run';
+    cancel.onclick = () => dlg.close();
+    dlg.onclose = () => { if (opener && opener.isConnected) opener.focus(); };
+    dlg.onclick = (e) => { if (e.target === dlg) dlg.close(); };
+    ok.onclick = async () => {
+      ok.disabled = true;
+      ok.textContent = 'Deleting…';
+      err.hidden = true;
+      try {
+        const res = await fetch(BASE + '/api/' + run.id + '/delete', { method: 'POST', headers: { 'X-Runs-Action': 'delete' }, credentials: 'same-origin' });
+        if (res.ok || res.status === 404) { location.href = BASE + '?deleted=1'; return; }
+        let message = 'The server refused (' + res.status + ').';
+        try { const body = await res.json(); if (body && typeof body.error === 'string') message = body.error; } catch {}
+        throw new Error(message);
+      } catch (e) {
+        err.textContent = e instanceof TypeError ? 'Couldn’t reach the server. Nothing was deleted.' : (e.message || 'Delete failed.') ;
+        err.hidden = false;
+        ok.disabled = false;
+        ok.textContent = 'Try again';
+      }
+    };
+    dlg.showModal();
+    cancel.focus();
+  }
+
+  let runTimer = 0;
+  function renderRun(data) {
+    const run = data.run, events = data.events || [];
+    const live = run.endedAt == null;
+    document.title = runTitle(run) + ' · Past runs · Wearable Task Guide';
+
+    const del = h('button', { class: 'btn danger', type: 'button', disabled: live, title: live ? 'Stop the run before deleting it' : null }, icon('trash'), 'Delete');
+    del.addEventListener('click', () => askDelete(run, del));
+    const c = run.counts || {};
+    const head = h('div', { class: 'run-head' },
+      h('div', { class: 'card-top' }, live ? liveBadge() : null, modeBadge(run), sourceBadge(run)),
+      h('h1', {}, runTitle(run)),
+      h('ul', { class: 'facts' },
+        h('li', {}, timeEl(run.startedAt, dayLabel(run.startedAt) + ', ' + timeFmt.format(run.startedAt)), relative(run.startedAt) ? ' · ' + relative(run.startedAt) : ''),
+        h('li', {}, h('strong', {}, live ? duration(Date.now() - run.startedAt) : duration(run.durationMs)), live ? ' so far' : ' long'),
+        run.task ? h('li', {}, 'Task: ', h('strong', {}, taskName(run.task))) : null,
+        h('li', {}, h('strong', {}, c.userTurns || 0), c.userTurns === 1 ? ' turn' : ' turns'),
+        h('li', {}, h('strong', {}, c.guideLines || 0), c.guideLines === 1 ? ' guide line' : ' guide lines'),
+        h('li', {}, h('strong', {}, c.frames || 0), c.frames === 1 ? ' camera image' : ' camera images'),
+        h('li', {}, h('strong', {}, c.audioClips || 0), c.audioClips === 1 ? ' audio clip' : ' audio clips')),
+      live ? h('p', { class: 'notice' }, 'This run is still going. New turns appear here by themselves.') : null,
+      !live && endNote(run) ? h('p', { class: 'notice quiet' }, endNote(run)) : null,
+      h('div', { class: 'actions' },
+        h('a', { class: 'btn', href: BASE + '/api/' + run.id + '?download=1', download: 'run-' + run.id + '.json' }, icon('download'), 'Download JSON'),
+        del));
+
+    main.className = '';
+    main.replaceChildren(h('a', { class: 'crumb', href: BASE }, icon('back'), 'All runs'), head, ...timelineSection(run, events, 'h2', 'Conversation'));
+
+    clearTimeout(runTimer);
+    if (live) {
+      runTimer = setTimeout(async function tick() {
+        // Never redraw under someone who is listening, reading a frame or mid-dialog.
+        const quiet = !player.busy() && !document.querySelector('dialog[open]') && !main.querySelector('details[open]');
+        try {
+          const next = quiet ? await getJson('/api/' + run.id) : null;
+          if (next && ((next.events || []).length !== events.length || next.run.endedAt != null)) return renderRun(next);
+        } catch {}
+        runTimer = setTimeout(tick, 5000);
+      }, 5000);
+    }
+  }
+
+  async function showRun(id) {
+    main.setAttribute('aria-busy', 'true');
+    main.replaceChildren(...runSkeleton());
+    try {
+      const data = await getJson('/api/' + id);
+      renderRun(data);
+      announce('Run loaded: ' + plural((data.events || []).filter((e) => e.type === 'user' || e.type === 'assistant').length, 'turn', 'turns'));
+    } catch (err) {
+      main.replaceChildren(h('a', { class: 'crumb', href: BASE }, icon('back'), 'All runs'), h('h1', {}, 'Run'), errorState(err, () => showRun(id)));
+    } finally {
+      main.removeAttribute('aria-busy');
+    }
+  }
+
+  // ---------- comparison ----------
+  // Only things counted straight from the recording — no scores.
+  function stats(run, events) {
+    const lines = events.filter((e) => e.type === 'assistant');
+    const said = events.filter((e) => e.type === 'user');
+    const lens = lines.map((e) => words(e.text));
+    const total = lens.reduce((a, b) => a + b, 0);
+    const rates = lines.map((e) => e.rate).filter((r) => typeof r === 'number');
+    const uniqueRates = Array.from(new Set(rates.map(rateLabel)));
+    const delivery = Array.from(new Set(lines.map((e) => e.deliveryMode).filter(Boolean)));
+    return {
+      duration: run.endedAt == null ? 'still going' : duration(run.durationMs),
+      userTurns: said.length,
+      guideLines: lines.length,
+      wordsPerLine: lines.length ? (total / lines.length).toFixed(1) : '—',
+      longest: lines.length ? Math.max(...lens) : '—',
+      totalWords: total,
+      repeats: said.filter((e) => REPEAT_RE.test(String(e.text).trim())).length,
+      slower: lines.filter((e) => e.slower).length,
+      rate: uniqueRates.length ? uniqueRates.join(', ') : 'not recorded',
+      delivery: delivery.length ? delivery.join(', ') : 'not recorded',
+    };
+  }
+
+  function compareTable(a, b) {
+    const sa = stats(a.run, a.events), sb = stats(b.run, b.events);
+    const colHead = (letter, d) => h('th', { scope: 'col' }, h('span', { class: 'ab' }, 'Run ' + letter), modeBadge(d.run),
+      h('a', { href: BASE + '/' + d.run.id }, runTitle(d.run)),
+      h('small', { style: 'display:block;color:var(--muted);font-weight:400;margin-top:2px' }, timeEl(d.run.startedAt, shortFmt.format(d.run.startedAt))));
+    const row = (label, va, vb, hint) => h('tr', {}, h('th', { scope: 'row' }, label, hint ? h('small', { style: 'display:block;font-size:12px' }, hint) : null), h('td', {}, va), h('td', {}, vb));
+    return h('div', { class: 'cmp-table-wrap' },
+      h('table', { class: 'cmp' },
+        h('caption', {}, 'Counted from the two recordings.'),
+        h('thead', {}, h('tr', {}, h('th', { scope: 'col' }, h('span', { class: 'sr-only' }, 'Measure')), colHead('A', a), colHead('B', b))),
+        h('tbody', {},
+          row('Length', sa.duration, sb.duration),
+          row('Times the person spoke', sa.userTurns, sb.userTurns),
+          row('Guide lines', sa.guideLines, sb.guideLines, 'one line = one spoken chunk'),
+          row('Words per guide line', sa.wordsPerLine, sb.wordsPerLine, 'average'),
+          row('Longest guide line', sa.longest === '—' ? '—' : sa.longest + ' words', sb.longest === '—' ? '—' : sb.longest + ' words'),
+          row('Words spoken by the guide', sa.totalWords, sb.totalWords),
+          row('“Repeat” requests', sa.repeats, sb.repeats, 'e.g. “repeat”, “say that again”'),
+          row('Slower repeats given', sa.slower, sb.slower),
+          row('Speech rate', sa.rate, sb.rate),
+          row('Delivery', sa.delivery, sb.delivery))));
+  }
+
+  async function showCompare() {
+    const q = new URLSearchParams(location.search);
+    let ids = [q.get('a'), q.get('b')];
+    main.className = 'wide';
+    const crumb = () => h('a', { class: 'crumb', href: BASE }, icon('back'), 'All runs');
+    if (!ids.every((id) => id && RUN_ID.test(id)) || ids[0] === ids[1]) {
+      main.replaceChildren(crumb(), h('h1', {}, 'Compare two runs'),
+        h('div', { class: 'state' }, icon('compare'), h('h2', {}, 'Pick two runs first'),
+          h('p', {}, 'On the list of past runs, tick “Compare” on two different runs, then choose “Compare these two”.'), h('a', { class: 'btn primary', href: BASE }, 'Go to the list')));
+      return;
+    }
+    main.setAttribute('aria-busy', 'true');
+    main.replaceChildren(crumb(), h('h1', {}, 'Compare two runs'), h('p', { class: 'lede' }, 'Loading both runs…'),
+      h('div', { class: 'run-head', 'aria-hidden': 'true', style: 'margin-top:18px' }, h('div', { class: 'skel line', style: 'width:60%' }), h('div', { class: 'skel line' }), h('div', { class: 'skel line', style: 'width:80%' })));
+    const results = await Promise.allSettled(ids.map((id) => getJson('/api/' + id)));
+    main.removeAttribute('aria-busy');
+    const failed = results.find((r) => r.status === 'rejected');
+    if (failed) {
+      const which = results.map((r, i) => (r.status === 'rejected' ? 'Run ' + 'AB'[i] : null)).filter(Boolean).join(' and ');
+      const err = failed.reason;
+      if (err && err.kind === 'missing') err.message = which + ' isn’t on the server any more. It may have been deleted, or replaced by newer runs.';
+      main.replaceChildren(crumb(), h('h1', {}, 'Compare two runs'), errorState(err, showCompare));
+      return;
+    }
+    let [a, b] = results.map((r) => r.value);
+    // Baseline reads as the "before": put it on the left when there is exactly one.
+    const ma = modeOf(a.run), mb = modeOf(b.run);
+    if ((mb === 'baseline' && ma !== 'baseline') || (ma === mb && b.run.startedAt < a.run.startedAt)) [a, b] = [b, a];
+    document.title = 'Compare runs · Past runs · Wearable Task Guide';
+
+    const same = modeOf(a.run) === modeOf(b.run) && modeOf(a.run) !== 'mixed';
+    const col = (letter, d) => h('section', { class: 'col', 'aria-label': 'Run ' + letter + ' conversation' },
+      ...timelineSection(d.run, d.events, 'h2', ['Run ' + letter, modeBadge(d.run)]));
+    main.replaceChildren(crumb(), h('h1', {}, 'Compare two runs'),
+      h('p', { class: 'lede' }, 'The same facts for both runs, then the two conversations next to each other.'),
+      compareTable(a, b),
+      h('p', { class: 'cmp-note' }, (same ? 'Both runs were recorded in ' + (modeOf(a.run) === 'toolkit' ? 'Toolkit' : 'Baseline') + ' mode. ' : '') +
+        'These are counts, not a score: the two takes may differ in what was asked and how long the person took between steps.'),
+      h('div', { class: 'cols' }, col('A', a), col('B', b)));
+    announce('Both runs loaded');
+  }
+
+  // ---------- which view ----------
+  const path = location.pathname.replace(/\/+$/, '');
+  const tail = path.startsWith(BASE) ? path.slice(BASE.length).replace(/^\//, '') : '';
+  if (tail === '') showList();
+  else if (tail === 'compare') showCompare();
+  else if (RUN_ID.test(tail)) showRun(tail);
+  else main.replaceChildren(errorState(new LoadError('missing', 'There’s no page at this address.'), null));
+})();
+</script>
+</body>
+</html>

@@ -2,10 +2,9 @@
 // say?"). Video 2's skill (docs/DESIGN.md §8).
 //
 // Trimmed on copy from the parts bin: the proactive auto-read monitor (lux
-// gate) and the learnFromRead preference-file writes are gone — learning
-// belongs to the toolkit's consent machinery now. What remains is the
-// on-request read: readVisibleText() returns the verbatim text plus how
-// small it looked (sizePct) and what kind of thing it was. The session
+// gate) and the learnFromRead preference-file writes are gone — this app
+// never writes to the profile. What remains is the on-request read:
+// readVisibleText() returns the verbatim text plus how small it looked (sizePct) and what kind of thing it was. The session
 // speaks it verbatim in baseline; in toolkit mode the profile block +
 // render turn it into gist-first delivery.
 

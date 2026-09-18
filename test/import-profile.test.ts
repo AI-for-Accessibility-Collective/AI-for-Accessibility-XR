@@ -1,13 +1,13 @@
 // import-profile.test.ts — fixture blob → temp store → exactly the 4 needs
-// with accurate sources; the validateProfileBlob gate; reset-take semantics
-// (a fresh store has no grants/proposals but keeps the profile).
+// with accurate sources; the validateProfileBlob gate; round trip and
+// idempotent re-import.
 
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateProfileBlob } from '@ai4a11y/toolkit';
-import { bootToolkit, ensureGrant, APP_ID, APP_SCOPES, type GuideToolkit } from '../src/toolkit/host.ts';
+import { bootToolkit, type GuideToolkit } from '../src/toolkit/host.ts';
 import fixture from './fixtures/margaret.blob.json';
 
 const dirs: string[] = [];
@@ -25,15 +25,6 @@ async function bootWithFixture(dir: string): Promise<GuideToolkit> {
   const res = await tk.librarian.importProfileBlob(fixture as never);
   expect(res.ok).toBe(true);
   return tk;
-}
-
-// Auto-accepting consent for tests that need the grant minted.
-function autoConsent(): GuideToolkit['consent'] {
-  return {
-    notifyPending() {},
-    present: async () => {},
-    capture: async () => 'accept' as const,
-  };
 }
 
 describe('fixture blob', () => {
@@ -79,32 +70,5 @@ describe('import into a fresh store', () => {
     expect(again.ok).toBe(true);
     const model = await tk.librarian.getAbilityModel();
     expect(model.needs).toHaveLength(4);
-  });
-});
-
-describe('reset-take semantics', () => {
-  test('wipe + re-import returns the store to pre-consent state', async () => {
-    // Take 1: fixture + grant minted (the consent beat has run).
-    const dir = tempDir();
-    let tk = await bootToolkit({ dataDir: dir, actingUser: 'margaret', consent: autoConsent() });
-    await tk.librarian.importProfileBlob(fixture as never);
-    expect(await ensureGrant(tk)).toBe('granted');
-    expect(await tk.librarian.listGrants()).toHaveLength(1);
-
-    // Retake: wipe the dir, boot fresh, re-import the fixture.
-    rmSync(dir, { recursive: true, force: true });
-    tk = await bootToolkit({ dataDir: dir, actingUser: 'margaret', consent: autoConsent() });
-    await tk.librarian.importProfileBlob(fixture as never);
-
-    expect(await tk.librarian.listGrants()).toHaveLength(0); // pre-consent
-    expect(await tk.librarian.listProposals('pending')).toHaveLength(0);
-    const model = await tk.librarian.getAbilityModel();
-    expect(model.needs).toHaveLength(4); // profile is back
-
-    // …and the whole consent beat replays cleanly on the fresh store.
-    expect(await ensureGrant(tk)).toBe('granted');
-    const grants = await tk.librarian.listGrants();
-    expect(grants[0]?.appId).toBe(APP_ID);
-    expect(grants[0]?.scopes.sort()).toEqual([...APP_SCOPES].sort());
   });
 });

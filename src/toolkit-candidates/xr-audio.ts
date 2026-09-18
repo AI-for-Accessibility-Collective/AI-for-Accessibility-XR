@@ -1,18 +1,20 @@
-// renderAudioSettings(model) — the OUTPUT injection (docs/DESIGN.md §7.1).
+// renderXRAudioSettings(model) — the XR audio surface: the profile in, one
+// vendor-neutral set of audio settings out.
 //
-// Pure math over the granted AbilityModel slice, written in the style of the
-// toolkit's surfaces/xr.js: dimensions in, one vendor-neutral render out.
-// XR's renderer only carries speech.rate and simplifyLanguage; an audio-first
-// surface needs delivery SHAPE — pacing, pause length, utterance size,
-// gist-first — which is exactly what this adds. `model: null` → all defaults,
-// and that IS baseline: the same engine speaks, unshaped, at 1.0×.
+// Built ON the toolkit's XR surface (surfaces/xr.js): speaking rate, simplify
+// and captions come straight from renderXRSettings. XR's renderer stops
+// there; an audio-first wearable also needs delivery SHAPE — pacing, pause
+// length, utterance size, gist-first, pitch, volume — which is what this adds.
+// `model: null` → all defaults, and that IS baseline: the same engine speaks,
+// unshaped, at 1.0×.
 //
-// Vendor mapping (ElevenLabs SpeakOptions, Gemini TTS style line) lives in
-// the sibling modules elevenlabs-map.ts / gemini-style.ts, never here.
+// It decides; it does nothing. Carrying the settings out is the adapters' job
+// (./adapters/).
 
 import type { AbilityModel, Need } from '@ai4a11y/toolkit';
+import { renderXRSettings } from '@ai4a11y/toolkit/surfaces/xr';
 
-export interface AudioRender {
+export interface XRAudioSettings {
   speech: {
     rate: number;                       // 1.0 = engine default
     pitchPreference: 'low' | 'standard';
@@ -36,36 +38,31 @@ export interface AudioRender {
 
 const STRENGTH_RANK: Record<string, number> = { floor: 3, preference: 2, hint: 1 };
 
-// The strongest need for a dimension (floor > preference > hint; first wins ties).
+// The winning need for a dimension, resolved the way surfaces/xr.js does it:
+// stronger strength wins, ties go to the later entry.
 function need(model: AbilityModel | null, dimension: string): Need | undefined {
   const needs = model?.needs;
   if (!Array.isArray(needs)) return undefined;
   let best: Need | undefined;
   for (const n of needs) {
     if (n.dimension !== dimension) continue;
-    if (!best || (STRENGTH_RANK[n.strength] ?? 0) > (STRENGTH_RANK[best.strength] ?? 0)) best = n;
+    if (!best || (STRENGTH_RANK[n.strength] ?? 0) >= (STRENGTH_RANK[best.strength] ?? 0)) best = n;
   }
   return best;
 }
 
-function truthy(n: Need | undefined): boolean {
-  return n != null && n.value !== false && n.value !== 0 && n.value !== '' && n.value != null;
-}
+export function renderXRAudioSettings(model: AbilityModel | null): XRAudioSettings {
+  // What the toolkit's XR surface already decides.
+  const xr = renderXRSettings((model ?? { needs: [] }) as Parameters<typeof renderXRSettings>[0]);
+  const rate = Number.isFinite(xr.speech.rate) ? xr.speech.rate : 1.0;
+  const simplify = xr.simplifyLanguage;
 
-export function renderAudioSettings(model: AbilityModel | null): AudioRender {
-  const rateNeed = need(model, 'readAloudRate');
-  const rate = typeof rateNeed?.value === 'number' && Number.isFinite(rateNeed.value) ? rateNeed.value : 1.0;
-
-  const pitchNeed = need(model, 'voicePitch');
-  const pitchPreference = pitchNeed?.value === 'low' ? 'low' : 'standard';
-
-  const pacingNeed = need(model, 'pacing');
-  const stepwise = pacingNeed?.value === 'stepwise';
-
-  const simplify = truthy(need(model, 'simplify'));
-
+  // What audio adds. These three dimensions are not in the toolkit's
+  // vocabulary yet (see README.md in this folder).
+  const pitchPreference = need(model, 'voicePitch')?.value === 'low' ? 'low' : 'standard';
+  const stepwise = need(model, 'pacing')?.value === 'stepwise';
   const detailNeed = need(model, 'spokenDetail');
-  // Spec: gistFirst ← needs spokenDetail === 'gist', else simplify.
+  // gistFirst ← spokenDetail === 'gist'; with no spokenDetail need, simplify.
   const gistFirst = detailNeed != null ? detailNeed.value === 'gist' : simplify;
 
   const hearing = Array.isArray(model?.supportAreas) && model.supportAreas.includes('hearing');
@@ -89,6 +86,6 @@ export function renderAudioSettings(model: AbilityModel | null): AudioRender {
       readingLevel: model?.readingLevel ?? null,
       language: model?.language || 'standard',
     },
-    captionsMirror: truthy(need(model, 'captions')),
+    captionsMirror: xr.captions.enabled,
   };
 }

@@ -36,9 +36,8 @@ Repo location: `~/mas/accessibility_collective/toolkitv2/wearable-extension/`.
         ◆ = toolkit injection (absent in baseline)                                   ▼
    Toolkit (same Bun process): Librarian · Margaret's AbilityModel (file store, APP_DATA_DIR)
      onboarded once at :4000/onboarding ─► scripts/import-profile.mjs (blob transfer)
-     requestGrant ─► spoken consent ─► exportAbilityModel ─► ◆ prompt-block + ◆ audio-render
-     repeat pattern ─► importInsight ─► consent proposal (never silent)
-   panels: demo page + /webview ◄── captions · consent card · Done button · A/B toggle
+     Toolkit mode chosen ─► getAbilityModel ─► ◆ prompt-directives + ◆ xr-audio
+   panels: demo page + /webview ◄── captions · Done button · A/B toggle
 ```
 
 ## 1. Target layout
@@ -57,13 +56,14 @@ wearable-extension/
 │   │                       webview.ts · webview-panel.html
 │   ├── engine/             engine.ts · request-engine.ts · vision.ts · tts.ts
 │   ├── runtime/            session.ts                       ← NEW (replaces old orchestrator)
-│   ├── toolkit/            host.ts · consent-audio.ts · prompt-block.ts   ← NEW
-│   ├── audio/              render.ts · elevenlabs-map.ts · gemini-style.ts · speaker.ts  ← NEW
+│   ├── toolkit/            host.ts                                        ← NEW
+│   ├── toolkit-candidates/ xr-audio.ts (surface) · adapters/ prompt-directives · paced-delivery · voice  ← NEW, meant to move into the toolkit
+│   ├── audio/              speaker.ts                                     ← NEW
 │   ├── skills/             types.ts · compose.ts · registry.ts
 │   │   └── builtin/        task-guide.ts ← NEW · read-text-aloud.ts (trimmed)
 │   └── tasks/              washing-machine.json (task BRIEF — facts, not wording) · bill.json
 ├── scripts/                drive-core.ts (trimmed) · import-profile.mjs ← NEW
-└── test/                   render · prompt-block · elevenlabs-map · speaker · task-guide · import-profile
+└── test/                   xr-audio · prompt-directives · voice · toolkit-candidates · speaker · task-guide · import-profile
 ```
 
 ## 2. Parts bin — what comes over from the old `wearable/`
@@ -72,12 +72,12 @@ wearable-extension/
 |---|---|---|---|
 | `transport/mentra-io.ts` | 92 | **keep** | add the `SpeakOptions` pass-through: `speak(session, text, opts?)` → `session.audio.speak(text, opts)` |
 | `transport/rtmp.ts` / `frames.ts` | 50 / 272 | **keep** | as-is |
-| `transport/demo-server.ts` | 616 | **keep** | drop `/onboard` route + profile wiring; add `/state` (mode, captions, consent card, step) + `/say` (typed utterance) if not present |
-| `transport/demo.html` | 1084 | **keep** | drop Setup/onboarding button; add A/B mode toggle, captions pane, consent card, big Done button |
-| `transport/webview.ts` / `webview-panel.html` | 422 / 191 | **keep** | drop onboarding routes; add the same A/B toggle, captions, consent card, Done |
+| `transport/demo-server.ts` | 616 | **keep** | drop `/onboard` route + profile wiring; add `/state` (mode, captions, step) + `/say` (typed utterance) if not present |
+| `transport/demo.html` | 1084 | **keep** | drop Setup/onboarding button; add A/B mode toggle, captions pane, big Done button |
+| `transport/webview.ts` / `webview-panel.html` | 422 / 191 | **keep** | drop onboarding routes; add the same A/B toggle, captions, Done |
 | `engine/engine.ts` / `request-engine.ts` | 34 / 64 | **keep — now central** | the request engine carries every content turn; temperature exposed (`LLM_TEMPERATURE`, default 0.2) |
 | `engine/vision.ts` | 47 | **keep** | as-is (verification + read) |
-| `engine/tts.ts` | 77 | **keep** | prepend the style line from `audio/gemini-style.ts` |
+| `engine/tts.ts` | 77 | **keep** | prepend the style line from `toolkit-candidates/adapters/voice.ts` |
 | `skills/types.ts` / `compose.ts` / `registry.ts` | 68 / 130 / 29 | **keep** | compose now assembles: base prompt + task brief + (toolkit mode) profile block; registry lists only `task-guide` + `read-text-aloud` |
 | `skills/builtin/read-text-aloud.ts` | 211 | **keep** | delete `learnFromRead`/preference-file writes; keep `readVisibleText()` (text + `sizePct` + `kind`); gist-first via the profile block + render |
 | `scripts/drive-core.ts` | 340 | **keep** | drop profile/onboarding wiring; boot `runtime/session.ts` |
@@ -103,22 +103,20 @@ Net: ~3,300 lines copied (≈2,900 of it the proven transport/demo surface),
 export type GuideToolkit = { librarian: Librarian; datastore: Datastore };
 export async function bootToolkit(opts: {
   dataDir: string;                 // APP_DATA_DIR, default ./data — NEVER the onboarding DATA_DIR
-  consent: ConsentPort;            // consent-audio.ts
-}): Promise<GuideToolkit>;         // createToolkit + runMigrations + minimal toolsRegistry
-
-export async function ensureGrant(tk: GuideToolkit): Promise<'granted'|'declined'|'pending'>;
-// requestGrant('wearable-extension',
-//   ['ability.categories','settings.text','reading.level','language'],   // ALL scopes the render reads:
-//   {appLabel:'Appliance Guide', …})                                     // without reading.level/language the
-// → the Consent port presents it (spoken + panel) → on "yes": respondToProposal(id,'accept')
-// exported model silently lacks readingLevel/language and video 2's dimension vanishes.
-// The spoken consent copy names them: "…your accessibility profile — needs, speech, and reading level."
+  actingUser?: string;             // whose profile the glasses read (APP_USER, default 'margaret')
+}): Promise<GuideToolkit>;         // createToolkit({ kv: fileKV(dataDir), clock }) + runMigrations + setActingUser
 
 export async function readModel(tk: GuideToolkit): Promise<AbilityModel | null>;
-// exportAbilityModel('wearable-extension'); null when no grant → caller falls back to defaults
-
-export async function proposeInsight(tk: GuideToolkit, kind: string, change: object, rationale: string): Promise<void>;
+// librarian.getAbilityModel() — the toolkit's documented read for an embedded host.
+// Passes on needs, supportAreas, readingLevel and language only: the person's free
+// text and the confidence score stop here. null when the store holds no profile →
+// the caller falls back to defaults.
 ```
+
+Choosing Toolkit mode is the go-ahead to read the profile; nothing is asked.
+(An earlier version asked for spoken permission; this demo treats choosing
+Toolkit mode as permission.) The app only reads the profile — it never writes
+to it.
 
 **Packaging reality (symlink install assumed):** at the pinned commit the
 toolkit's `exports` map has a `./platforms/node/kv.js` subpath, so `fileKV` is
@@ -130,11 +128,11 @@ covers `platforms/` and `registry/` but still omits `hosts/`, so Phase 0's
 a pack-style install would break it. Do **not** patch the toolkit (ground
 rule 2); the remaining gap is a FOLLOW-UPS note.
 
-### 3.2 `src/toolkit/prompt-block.ts` — the INPUT injection
+### 3.2 `src/toolkit-candidates/adapters/prompt-directives.ts` — the INPUT injection
 
 ```ts
-export function profilePromptBlock(model: AbilityModel, r: AudioRender): string;
-// Pure. Granted needs only — model.freeText never reaches the prompt.
+export function profilePromptBlock(model: AbilityModel, r: XRAudioSettings): string;
+// Pure. Structured needs only — model.freeText never reaches the prompt.
 // From r.delivery.mode==='stepwise': "Give exactly ONE next action, then stop and wait
 //   for the user to say 'done'. Never list multiple steps."
 //   + confirm-then-next: "When the user says 'done', acknowledge it in a few words
@@ -152,32 +150,27 @@ export function profilePromptBlock(model: AbilityModel, r: AudioRender): string;
 // Baseline mode: the block is simply absent — the model gets the normal input.
 ```
 
-### 3.3 `src/toolkit/consent-audio.ts`
+### 3.3 — removed
 
-```ts
-export function audioConsent(io: {
-  speak(text: string): Promise<void>;
-  showCard(card: ConsentCard | null): void;                 // demo + webview panels
-  nextUtterance(timeoutMs: number): Promise<string | null>; // session's STT stream
-}): ConsentPort;
-// present: speak "…would like to read your accessibility profile — needs and speech. Okay?" + card
-// capture: "yes"/"okay" → 'accept' · "no"/"not now" → 'declineOnce' · panel tap wins ties · null on timeout
-```
+Nothing here any more (see the note in §3.1). Later sections keep their
+numbers because the code refers to them.
 
-### 3.4 `src/audio/` — the OUTPUT injection
+### 3.4 `src/toolkit-candidates/` + `src/audio/speaker.ts` — the OUTPUT injection
 
-- `render.ts` — `renderAudioSettings(model)`: the design doc §7.1 table
+The surface and the adapters live in `src/toolkit-candidates/` (its README
+says why, and what would go to the toolkit); the speaker stays app-side.
+
+- `xr-audio.ts` — `renderXRAudioSettings(model)`, built on the toolkit's `renderXRSettings`: the design doc §7.1 table
   verbatim; `model: null` → all defaults (that IS baseline).
-- `elevenlabs-map.ts` — `toSpeakOptions(r)`: speed clamped 0.7–1.2; steady →
+- `adapters/voice.ts` — `toSpeakOptions(r)`: speed clamped 0.7–1.2; steady →
   `{stability: 0.75, style: 0}`; volume + `use_speaker_boost`; ONE constant
   `voice_id` under `FILM_MODE` (same-voice A/B rule).
-- `gemini-style.ts` — `styleLine(r)`: laptop-TTS style instruction only.
+- `adapters/voice.ts` — `styleLine(r)`: laptop-TTS style instruction only.
 - `speaker.ts` — `createSpeaker(sink, r)`: the one place speech is shaped.
   Chunk to `maxWordsPerUtterance`, silence `pauseAfterUtteranceMs` between
   chunks, done-gating hooks, repeat memory — `repeat()` **replays the
   transcript verbatim** (never regenerates); a second repeat of the same step →
-  `speed − 0.1` (floor 0.7) and counts toward `onRepeatPattern` (the insight
-  beat). `setRender(r)` re-renders live on A/B toggle. Guardrail: in toolkit
+  `speed − 0.1` (floor 0.7) for that replay only. `setRender(r)` re-renders live on A/B toggle. Guardrail: in toolkit
   mode chunking/gating apply even if the model rambles; in baseline the raw
   answer passes through unshaped — that is the point.
 
@@ -189,7 +182,7 @@ export function createSession(deps: {
   tk: GuideToolkit | null; panel: PanelBus; tasks: TaskLibrary;
 }): {
   setMode(mode: 'baseline' | 'toolkit'): Promise<void>;
-  // toolkit: ensureGrant → readModel → render + promptBlock; baseline: render(null), no block
+  // toolkit: readModel → render + promptBlock, straight away; baseline: render(null), no block
   onUtterance(text: string): Promise<void>;
   // deterministic first: done|next · repeat|again · stop; task trigger by keyword; engine turn fallback
   state(): SessionState;    // for /state and the panels
@@ -235,7 +228,7 @@ export function createTaskGuide(task: Task, engine: ConversationEngine, vision: 
 Pure policy over an injected engine — unit tests stub the engine with canned
 replies and assert the turn requests + gating, not the model's prose.
 
-### 3.7 `scripts/import-profile.mjs` + `scripts/reset-take.mjs`
+### 3.7 `scripts/import-profile.mjs`
 
 ```
 node scripts/import-profile.mjs --uid margaret --seed \
@@ -256,15 +249,8 @@ needs. **Run only while the onboarding server is stopped** (single-writer
 stores). A checked-in `test/fixtures/margaret.blob.json` (the 4 needs) is the
 test input and the no-onboarding fallback (`--fixture`).
 
-`reset-take.mjs` — **the retake button.** Grants and insights are consent
-proposals with dedup, decline cooldowns, and a default **3-proposals-per-week
-cap**; a minted grant returns `already-granted` on the next ask. So the
-consent and insight beats are only re-filmable from a fresh store:
-`reset-take.mjs` wipes `APP_DATA_DIR` and re-imports the fixture blob (~10 s).
-Used between every toolkit-mode take and in rehearsal loops; for long
-rehearsal sessions `bootToolkit({rehearsal:true})` may pass the toolkit's
-`demo` port (which lifts the weekly cap) — rehearsal only, never the filmed
-take.
+There is nothing to reset between takes: the app only reads the profile, so
+every Toolkit take starts from the same one.
 
 ## 4. Phases
 
@@ -277,16 +263,14 @@ applied on copy; stub `session.ts` (echoes utterances).
 utterance echoes; the toolkit's own `demo:xr` passes from the linked dep.
 
 **Phase 1 — toolkit host + Margaret (½ day).**
-`toolkit/host.ts`, `import-profile.mjs` (with `--seed`), `reset-take.mjs`,
-fixture blob; onboard "margaret" once at `:4000/onboarding` (ticking `hearing`
+`toolkit/host.ts`, `import-profile.mjs` (with `--seed`), fixture blob; onboard "margaret" once at `:4000/onboarding` (ticking `hearing`
 + `cognitive` — the page labels raw area ids), then seed + import for real.
 *Accept:* script prints exactly the 4 needs (no stray `reduceMotion`) with
-accurate sources from the app store; round-trip and reset tests pass on temp
-dirs.
+accurate sources from the app store; round-trip tests pass on temp dirs.
 
 **Phase 2 — the two injections (1 day).**
-`audio/render.ts` + `elevenlabs-map` + `gemini-style` + `speaker` and
-`toolkit/prompt-block.ts`, all with tests; demo `/tts` gets the style line;
+`xr-audio` + `voice` + `paced-delivery` + `speaker` and
+`prompt-directives`, all with tests; demo `/tts` gets the style line;
 `mentra-io` gets the SpeakOptions pass-through.
 *Accept:* `render(margaret)` matches the spec table field-for-field;
 `profilePromptBlock(margaret)` contains the one-step + plain-words + short-
@@ -300,18 +284,17 @@ captions + Done on both panels; live Gemini turns.
 *Accept — the big one:* in the demo surface with a webcam, the entire video-1
 A/B runs hardware-free with **generated** guidance: baseline answers the
 question in one raw paragraph at 1.0× and repeats it verbatim; toolkit mode
-does grant → one short plain step at a time at 0.8× with Done gating and
+reads the profile → one short plain step at a time at 0.8× with Done gating and
 captions. `task-guide.test.ts` (stubbed engine) covers turn-shape, done/repeat,
 verify-degrade, continuous mode.
 
-**Phase 4 — consent + insight beats (½ day).**
-`consent-audio.ts` wired into `ensureGrant`; `speaker.onRepeatPattern` →
-`proposeInsight`; proposal card + accept in both panels.
-*Accept:* spoken consent mints the grant (`listGrants`) with all four scopes
-(`ability.categories`, `settings.text`, `reading.level`, `language`); two
-repeats surface a pending proposal; accepting updates the model, the render,
-AND the next prompt block — nothing applied silently. `reset-take.mjs` then
-returns the store to pre-consent state and the whole beat replays cleanly.
+**Phase 4 — Toolkit mode reads the profile (¼ day).**
+`session.setMode('toolkit')` → `readModel` → render + prompt block, with no
+question in between.
+*Accept:* switching to Toolkit applies Margaret's render (0.8×, stepwise,
+captions) before `setMode` resolves and speaks nothing; the person's free text
+is in neither the prompt nor the panel state; baseline is unchanged; "repeat"
+replays word for word and the profile is never written.
 
 **Phase 5 — vision verification + video 2 (1 day).**
 Verify hook against the FrameStore + `engine/vision.ts`; `read-text-aloud`
@@ -323,8 +306,7 @@ in baseline.
 
 **Phase 6 — glasses bring-up (1 day).**
 Mentra console app (`app_config.json`), public URL, `RTMP_HOST`; real
-SpeakOptions on-device; STT of "done" in a noisy room; consent by voice;
-volume levels; then the design doc's dry-run checklist.
+SpeakOptions on-device; STT of "done" in a noisy room; volume levels; then the design doc's dry-run checklist.
 *Accept:* the full video-1 toolkit take, on glasses, twice in a row without
 touching the laptop.
 
@@ -337,11 +319,11 @@ listed.
 | Test | Covers |
 |---|---|
 | `render.test.ts` | every render field vs the spec table; `null` model → defaults |
-| `prompt-block.test.ts` | directives present per need; empty for `null` model; `freeText` never leaks |
-| `elevenlabs-map.test.ts` | speed clamp 0.7–1.2; steady → stability/style; constant voice_id under FILM_MODE |
+| `prompt-directives.test.ts` | directives present per need; empty for `null` model; `freeText` never leaks |
+| `voice.test.ts` | speed clamp 0.7–1.2; steady → stability/style; constant voice_id under FILM_MODE |
 | `speaker.test.ts` | chunking; pause timing (fake timers); transcript-replay repeat + slowdown; stop cancels |
 | `task-guide.test.ts` | stubbed engine: one-step turn requests in stepwise, single full turn in continuous; done/repeat/stop; verify yes/no/unclear/timeout; trigger match |
-| `import-profile.test.ts` | fixture blob → temp store → exactly 4 needs with accurate sources; `--seed` replaces the derived array; `validateProfileBlob` gate; `reset-take` restores pre-consent state |
+| `import-profile.test.ts` | fixture blob → temp store → exactly 4 needs with accurate sources; `--seed` replaces the derived array; `validateProfileBlob` gate; round trip; idempotent re-import |
 | manual (Phase 3/6) | the A/B acceptance runs above |
 
 ## 6. `.env.example`

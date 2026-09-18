@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Wearable Task Guide",
+    "slug": "task-guide-phone",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "edu.mit.media.applianceguide",
+      "infoPlist": {
+        "UIBackgroundModes": ["bluetooth-central", "audio"],
+        "NSBluetoothAlwaysUsageDescription": "Wearable Task Guide connects to your smart glasses over Bluetooth.",
+        "NSBluetoothPeripheralUsageDescription": "Wearable Task Guide connects to your smart glasses over Bluetooth.",
+        "NSMicrophoneUsageDescription": "Wearable Task Guide listens to your spoken requests through the glasses microphone.",
+        "NSLocalNetworkUsageDescription": "Wearable Task Guide can talk to a guide server running on your own network."
+      }
+    },
+    "android": {
+      "package": "edu.mit.media.applianceguide",
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.INTERNET",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
+    },
+    "plugins": [
+      "./plugins/withAndroid16KbPageSize",
+      ["@mentra/bluetooth-sdk", { "node": true }],
+      [
+        "expo-build-properties",
+        {
+          "ios": { "deploymentTarget": "15.5" },
+          "android": {
+            "minSdkVersion": 33,
+            "packagingOptions": {
+              "exclude": ["**/libcoder.so"],
+              "pickFirst": ["**/libc++_shared.so", "**/libonnxruntime.so", "**/libonnxruntime4j_jni.so"]
+            }
+          }
+        }
+      ],
+      "expo-audio"
+    ]
+  }
+}

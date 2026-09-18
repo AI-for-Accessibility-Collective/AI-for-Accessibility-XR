@@ -2,13 +2,12 @@
 //
 // Everything the app says goes through here, in both modes. What the render
 // contributes is applied at this seam:
-//   - chunking to delivery.maxWordsPerUtterance (sentence-packed, never
-//     mid-sentence), with speech.pauseAfterUtteranceMs of silence between
-//     chunks — the app-orchestration TTS layer (docs/DESIGN.md §5.1 layer 3);
+//   - chunking and pauses — the paced-delivery adapter
+//     (toolkit-candidates/adapters/paced-delivery.ts);
+//   - the voice engine's options — the voice adapter (adapters/voice.ts);
 //   - repeat memory: repeat() REPLAYS the last utterance's transcript
 //     verbatim, never regenerates; the second repeat of the same step drops
-//     the rate by 0.1 (the ElevenLabs map clamps at 0.7) and fires
-//     onRepeatPattern — the insight beat's trigger. Lines said with
+//     the rate by 0.1 (the ElevenLabs map clamps at 0.7). Lines said with
 //     { remember: false } (an apology, a camera confirmation) are spoken but
 //     never become what "repeat" replays;
 //   - setRender() re-shapes live on the A/B toggle.
@@ -17,10 +16,9 @@
 // in baseline the render defaults (maxWords null, 250 ms pause, 1.0×) mean
 // the raw answer passes through as one unshaped utterance — that is the point.
 
-import type { AudioRender } from './render.ts';
-import { renderAudioSettings } from './render.ts';
-import { toSpeakOptions, type MapOpts } from './elevenlabs-map.ts';
-import type { SpeakOptions } from '../transport/mentra-io.ts';
+import { renderXRAudioSettings, type XRAudioSettings } from '../toolkit-candidates/xr-audio.ts';
+import { chunkText, deliverPaced } from '../toolkit-candidates/adapters/paced-delivery.ts';
+import { toSpeakOptions, type MapOpts, type SpeakOptions } from '../toolkit-candidates/adapters/voice.ts';
 
 export interface UtteranceMeta {
   // ElevenLabs/Mentra options for this chunk (rate delta already applied).
@@ -28,7 +26,7 @@ export interface UtteranceMeta {
   // True on the slowed-down replay (second repeat of the same step).
   slower: boolean;
   // The render in effect — the demo sink derives its Gemini style line from it.
-  render: AudioRender;
+  render: XRAudioSettings;
   // Which logical step this chunk belongs to, if the caller tagged one.
   stepId: string | null;
   // Chunk position, for sinks that show progress.
@@ -40,12 +38,13 @@ export interface SpeakerSink {
   // Deliver ONE chunk. Resolve when (approximately) done speaking so the
   // speaker's inter-chunk pause runs after delivery, not during it.
   speak(text: string, meta: UtteranceMeta): Promise<void>;
+  // Called once with every chunk of an utterance before the first speak(), so a
+  // sink that synthesizes speech can start on all of them at once instead of
+  // one at a time between pauses.
+  prepare?(chunks: string[], meta: Omit<UtteranceMeta, 'index' | 'count'>): void;
 }
 
 export interface SpeakerHooks {
-  // Fired when the wearer has asked for the SAME step twice ("twice in one
-  // minute" in the film): the signal the session turns into importInsight.
-  onRepeatPattern?: (info: { stepId: string | null; count: number }) => void;
   // Injectable pause, so tests run on fake time.
   sleep?: (ms: number) => Promise<void>;
   // FILM_MODE + voice for the ElevenLabs map.
@@ -61,47 +60,17 @@ export interface SayOptions {
 export interface Speaker {
   say(text: string, opts?: SayOptions): Promise<void>;
   repeat(): Promise<boolean>; // false = nothing to repeat
-  setRender(r: AudioRender): void;
-  render(): AudioRender;
+  setRender(r: XRAudioSettings): void;
+  render(): XRAudioSettings;
   stop(): void;
   // Forget the repeat memory (transcript + per-step counts). Called on a mode
-  // switch and on a new task, so a baseline take's repeats can never count
-  // toward the toolkit take's insight beat.
+  // switch and on a new task, so one take's repeats never slow the next.
   reset(): void;
   transcript(): string | null; // the last remembered utterance, verbatim
 }
 
-// Split into sentences, then pack sentences greedily into chunks of at most
-// maxWords words. A single sentence longer than maxWords stays whole — the
-// prompt block asks the model for short sentences; the speaker never breaks
-// one mid-thought. null → one chunk (baseline).
-export function chunkText(text: string, maxWords: number | null): string[] {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return [];
-  if (maxWords == null) return [clean];
-  const sentences = clean.split(/(?<=[.!?…])\s+/);
-  const chunks: string[] = [];
-  let current: string[] = [];
-  let words = 0;
-  for (const s of sentences) {
-    const w = s.split(' ').length;
-    if (current.length && words + w > maxWords) {
-      chunks.push(current.join(' '));
-      current = [];
-      words = 0;
-    }
-    current.push(s);
-    words += w;
-  }
-  if (current.length) chunks.push(current.join(' '));
-  return chunks;
-}
-
-const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-export function createSpeaker(sink: SpeakerSink, initial?: AudioRender, hooks: SpeakerHooks = {}): Speaker {
-  let render = initial ?? renderAudioSettings(null);
-  const sleep = hooks.sleep ?? defaultSleep;
+export function createSpeaker(sink: SpeakerSink, initial?: XRAudioSettings, hooks: SpeakerHooks = {}): Speaker {
+  let render = initial ?? renderXRAudioSettings(null);
 
   let last: { text: string; stepId: string | null } | null = null;
   const repeatCounts = new Map<string, number>();
@@ -111,25 +80,16 @@ export function createSpeaker(sink: SpeakerSink, initial?: AudioRender, hooks: S
   // Serialize utterances so two say() calls never interleave chunks.
   let chain: Promise<unknown> = Promise.resolve();
 
-  async function deliver(text: string, stepId: string | null, rateDelta: number, slower: boolean): Promise<void> {
+  function deliver(text: string, stepId: string | null, rateDelta: number, slower: boolean): Promise<void> {
     const gen = generation;
-    const chunks = chunkText(text, render.delivery.maxWordsPerUtterance);
-    for (let i = 0; i < chunks.length; i++) {
-      if (gen !== generation) return;
-      const speakOptions = toSpeakOptions(render, { rateDelta, ...hooks.mapOpts });
-      await sink.speak(chunks[i]!, {
-        speakOptions,
-        slower,
-        render,
-        stepId,
-        index: i,
-        count: chunks.length,
-      });
-      if (gen !== generation) return;
-      if (i < chunks.length - 1 && render.speech.pauseAfterUtteranceMs > 0) {
-        await sleep(render.speech.pauseAfterUtteranceMs);
-      }
-    }
+    const speakOptions = toSpeakOptions(render, { rateDelta, ...hooks.mapOpts });
+    sink.prepare?.(chunkText(text, render.delivery.maxWordsPerUtterance), { speakOptions, slower, render, stepId });
+    return deliverPaced(
+      text,
+      render,
+      (chunk, index, count) => sink.speak(chunk, { speakOptions, slower, render, stepId, index, count }),
+      { sleep: hooks.sleep, cancelled: () => gen !== generation },
+    );
   }
 
   return {
@@ -146,8 +106,7 @@ export function createSpeaker(sink: SpeakerSink, initial?: AudioRender, hooks: S
 
     // Replay the transcript VERBATIM — never regenerate (a rephrased "repeat"
     // is exactly the failure the film shows baseline making). Second repeat of
-    // the same step slows delivery and fires the repeat-pattern hook AFTER the
-    // replay lands, so the insight question never talks over the step.
+    // the same step slows delivery a little.
     repeat(): Promise<boolean> {
       if (!last) return Promise.resolve(false);
       const { text, stepId } = last;
@@ -156,21 +115,16 @@ export function createSpeaker(sink: SpeakerSink, initial?: AudioRender, hooks: S
       repeatCounts.set(key, count);
       const slower = count >= 2;
       const run = () => deliver(text, stepId, slower ? -0.1 : 0, slower);
-      const p = chain
-        .then(run, run)
-        .then(() => {
-          if (slower) hooks.onRepeatPattern?.({ stepId, count });
-          return true;
-        });
+      const p = chain.then(run, run).then(() => true);
       chain = p.catch(() => {});
       return p;
     },
 
-    setRender(r: AudioRender): void {
+    setRender(r: XRAudioSettings): void {
       render = r;
     },
 
-    render(): AudioRender {
+    render(): XRAudioSettings {
       return render;
     },
 

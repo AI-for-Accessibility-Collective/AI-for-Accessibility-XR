@@ -1,7 +1,6 @@
 // Centralized env parsing, trimmed from the old draft's wearable config to
-// exactly what the Appliance Guide uses (docs/PLAN.md §6). Kept
-// dependency-free so the Mentra-agnostic core can import it without pulling
-// in @mentra/sdk.
+// exactly what the Wearable Task Guide uses (docs/PLAN.md §6). Kept
+// dependency-free so the glasses-agnostic core can import it freely.
 
 function req(name: string): string {
   const v = process.env[name];
@@ -34,9 +33,9 @@ function bool(name: string, fallback: boolean): boolean {
 export type GuideMode = 'baseline' | 'toolkit';
 
 export const config = {
-  // Mentra app — only required when actually running on glasses (index.ts).
-  packageName: process.env.PACKAGE_NAME || '',
-  mentraApiKey: process.env.MENTRAOS_API_KEY || '',
+  // The phone app (phone/) dials in to PORT and proves itself with this shared
+  // secret — only required when actually running on glasses (index.ts).
+  bridgeToken: process.env.BRIDGE_TOKEN || '',
   port: int('PORT', 3000),
 
   // Gemini
@@ -46,8 +45,13 @@ export const config = {
   // and ~0.9 s per turn; the newer 3.8-flash invented details and can't turn
   // thinking off. Pin a concrete id — aliases can move mid-shoot.
   visionModel: opt('VISION_MODEL', 'gemini-3.5-flash'),
+  // Writes down what the wearer says (src/engine/stt.ts).
+  sttModel: opt('STT_MODEL', opt('VISION_MODEL', 'gemini-3.5-flash')),
   ttsModel: opt('TTS_MODEL', 'gemini-3.1-flash-tts-preview'),
   ttsVoice: opt('TTS_VOICE', 'Kore'),
+  // Past this, a line is read by the phone's own voice instead of waiting: one
+  // stalled Gemini TTS call (21 s has happened) must not freeze a take.
+  ttsDeadlineMs: int('TTS_DEADLINE_MS', 9000),
   llmTemperature: num('LLM_TEMPERATURE', 0.2),
 
   // Spending safety nets. The runaway guard (src/engine/gemini-rest.ts) turns
@@ -61,8 +65,7 @@ export const config = {
   autoPauseIdleMin: int('AUTO_PAUSE_IDLE_MIN', 15),
 
   // The A/B switch (docs/DESIGN.md §2): which mode the app boots in; panels
-  // toggle it live. Baseline by default — it is the film's first take, and a
-  // toolkit boot would speak the consent question before anyone pressed Start.
+  // toggle it live. Baseline by default — it is the film's first take.
   guideMode: (opt('GUIDE_MODE', 'baseline') === 'toolkit' ? 'toolkit' : 'baseline') as GuideMode,
 
   // FILM_MODE locks the ElevenLabs voice_id constant across modes and turns
@@ -81,6 +84,12 @@ export const config = {
   rtmpPort: int('RTMP_PORT', 1935),
   rtmpHost: process.env.RTMP_HOST || '',
   frameRate: int('FRAME_RATE', 3),
+  // Picture the glasses are asked to send. Left to themselves they send 854×480,
+  // too soft to read a dial or a label; 720p reads well and still streams
+  // comfortably over ordinary Wi-Fi.
+  streamWidth: int('STREAM_WIDTH', 1280),
+  streamHeight: int('STREAM_HEIGHT', 720),
+  streamBitrate: int('STREAM_BITRATE', 3_000_000),
   captureFps: int('CAPTURE_FPS', 3),
   frameRingSize: int('FRAME_RING_SIZE', 3),
 
@@ -88,6 +97,14 @@ export const config = {
   enableDemo: bool('ENABLE_DEMO', true),
   demoPort: int('DEMO_PORT', int('PORT', 3000) + 1),
   demoStreamFps: int('DEMO_STREAM_FPS', 8),
+
+  // Past runs (src/runtime/run-recorder.ts): every Start→Stop take is kept on
+  // disk, newest RUNS_KEEP of them. Never inside APP_DATA_DIR — that store is
+  // the toolkit's. The pages under /webview/runs show camera images from
+  // inside someone's home, so they stay off until ADMIN_PASSWORD is set.
+  runsDir: opt('RUNS_DIR', './runs'),
+  runsKeep: int('RUNS_KEEP', 40),
+  adminPassword: process.env.ADMIN_PASSWORD || '',
 };
 
 // Throwing accessors used only by code paths that genuinely need the value.
@@ -96,8 +113,8 @@ export function requireGeminiKey(): string {
   return config.geminiApiKey;
 }
 
-export function requireMentraEnv(): { packageName: string; apiKey: string } {
-  return { packageName: req('PACKAGE_NAME'), apiKey: req('MENTRAOS_API_KEY') };
+export function requireBridgeToken(): string {
+  return req('BRIDGE_TOKEN');
 }
 
 // Reason the demo server can't safely bind, or null if it's fine.

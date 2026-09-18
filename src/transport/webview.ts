@@ -1,29 +1,25 @@
-// The phone-facing dashboard, mounted on the Mentra AppServer's Express app.
+// The browser control panel, mounted on the phone bridge's Express app
+// (phone-bridge.ts) at /webview on the app's PUBLIC URL.
 //
-// MentraOS opens an app's dashboard via a `/webview` endpoint on the app's
-// PUBLIC URL — the same AppServer/port MentraOS Cloud already proxies. The
-// standalone Bun demo (demo-server.ts) lives on its own port and is
-// unreachable from the phone, so this module re-exposes the SAME controls on
-// the AppServer: power, the A/B mode toggle, Done/Repeat, the consent card,
-// and the activity log.
+// The standalone Bun demo (demo-server.ts) lives on its own port and is not
+// public, so this module re-exposes the SAME controls here: power, the A/B
+// mode toggle, Done/Repeat and the activity log. The phone app has its own
+// copy of those controls; this panel is for a laptop or a second person.
 //
-// Trimmed on copy from the old draft: onboarding routes, skill chips,
-// environmental-gate settings and the noise meter are gone. demo.html is
-// still servable under the mount for a screen-shareable big view — its
-// absolute endpoint paths are rewritten to the `/webview` prefix at serve
-// time, keeping clear of the SDK-reserved routes (/health, POST /settings,
-// /tool, /webhook, /photo-upload, /mentra-auth).
+// demo.html is still servable under the mount for a screen-shareable big
+// view — its absolute endpoint paths are rewritten to the `/webview` prefix at
+// serve time, keeping clear of the bridge's own routes (/health, /phone).
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { FrameStore } from './frames.ts';
 import type { DemoEvent, DemoSource } from './demo-server.ts';
 import type { SessionState, GuideMode } from '../runtime/session.ts';
+import { createProfileApi, type ProfileApiDeps } from './profile-api.ts';
 
 const MOUNT = '/webview';
 
-// Minimal structural type for the AppServer's Express app — just the methods
-// we use (the SDK types Express req/res as `any` too).
+// Minimal structural type for the Express app — just the methods we use.
 type RouteHandler = (req: any, res: any) => void;
 export interface ExpressLike {
   get(path: string | string[], handler: RouteHandler): unknown;
@@ -37,7 +33,13 @@ export interface WebviewOptions {
   sessionState: () => SessionState;
   tts?: (text: string) => Promise<{ audio: Uint8Array; mime: string } | null>;
   streamFps?: number;
-  onReset?: () => Promise<void> | void;
+  // True when the password-protected run history (runs-web.ts) is on, so the
+  // pages know whether to show their "Past runs" link.
+  runsEnabled?: boolean;
+  // The profile editor (profile-api.ts): the live store handle and the
+  // session refresh, both looked up per call because the glasses app opens
+  // its store per phone session. Absent → the /profile routes answer 409.
+  profile?: Pick<ProfileApiDeps, 'toolkit' | 'onProfileChanged'>;
 }
 
 export interface WebviewHandle {
@@ -48,7 +50,6 @@ export interface WebviewHandle {
       source: DemoSource;
       onSetActive: (active: boolean) => void;
       onSetMode: (mode: GuideMode) => void | Promise<void>;
-      onConsent: (response: 'accept' | 'declineOnce') => void | Promise<void>;
       active: boolean;
     }>,
   ) => void;
@@ -59,9 +60,9 @@ function loadPanelHtml(): string {
 }
 
 // demo.html requests absolute paths (/events, /stream.mjpg, …); rewrite each
-// to `${MOUNT}/…` so it runs under the prefix on the AppServer. Anchored on
+// to `${MOUNT}/…` so it runs under the prefix. Anchored on
 // the opening quote so `/frame` (POST) doesn't clobber `/frame.jpg`.
-const DEMO_ROUTES = ['frame\\.jpg', 'stream\\.mjpg', 'events', 'say', 'status', 'active', 'tts', 'reset', 'mode', 'consent', 'source', 'shutdown', 'frame'];
+const DEMO_ROUTES = ['frame\\.jpg', 'stream\\.mjpg', 'events', 'say', 'status', 'active', 'tts', 'mode', 'source', 'shutdown', 'frame', 'runs', 'profile'];
 const DEMO_REWRITE = new RegExp(`(['"])/(?=(?:${DEMO_ROUTES.join('|')})\\b)`, 'g');
 function loadDemoHtml(): string {
   const raw = readFileSync(fileURLToPath(new URL('./demo.html', import.meta.url)), 'utf8');
@@ -80,7 +81,6 @@ export function mountWebview(opts: WebviewOptions): WebviewHandle {
   let source: DemoSource = opts.source;
   let onSetActive: ((active: boolean) => void) | undefined;
   let onSetMode: ((mode: GuideMode) => void | Promise<void>) | undefined;
-  let onConsent: ((response: 'accept' | 'declineOnce') => void | Promise<void>) | undefined;
   let active = false;
 
   // SSE fan-out + a small ring so a freshly-opened page gets recent context.
@@ -180,7 +180,7 @@ export function mountWebview(opts: WebviewOptions): WebviewHandle {
       acceptBrowserCam: false, // the glasses camera is the source here
       active,
       canSetMode: !!onSetMode,
-      canReset: !!opts.onReset,
+      runs: !!opts.runsEnabled,
       state: opts.sessionState(),
     });
   });
@@ -198,35 +198,6 @@ export function mountWebview(opts: WebviewOptions): WebviewHandle {
     }
     await onSetMode(mode);
     res.status(204).end();
-  });
-
-  // ---- a consent-card tap ----
-  app.post(`${MOUNT}/consent`, async (req: any, res: any) => {
-    if (!onConsent) {
-      res.status(409).send('consent not wired');
-      return;
-    }
-    const response = req.body?.response;
-    if (response !== 'accept' && response !== 'declineOnce') {
-      res.status(400).send('bad response');
-      return;
-    }
-    await onConsent(response);
-    res.status(204).end();
-  });
-
-  // ---- the retake button ----
-  app.post(`${MOUNT}/reset`, async (_req: any, res: any) => {
-    if (!opts.onReset) {
-      res.status(409).send('reset not available');
-      return;
-    }
-    try {
-      await opts.onReset();
-      res.status(204).end();
-    } catch (e) {
-      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
-    }
   });
 
   // ---- speak a line through the dashboard speaker (Gemini TTS) ----
@@ -264,7 +235,26 @@ export function mountWebview(opts: WebviewOptions): WebviewHandle {
     res.status(204).end();
   });
 
-  console.log(`  [webview] dashboard mounted at ${MOUNT} on the Mentra app server`);
+  // ---- the profile editor ----
+  const profileApi = createProfileApi({
+    toolkit: opts.profile?.toolkit ?? (() => null),
+    sessionState: opts.sessionState,
+    onProfileChanged: opts.profile?.onProfileChanged,
+  });
+  app.get(`${MOUNT}/profile`, async (_req: any, res: any) => {
+    const r = await profileApi.get();
+    res.status(r.status).json(r.body);
+  });
+  app.post(`${MOUNT}/profile`, async (req: any, res: any) => {
+    const r = await profileApi.set(req.body);
+    res.status(r.status).json(r.body);
+  });
+  app.post(`${MOUNT}/profile/reset`, async (_req: any, res: any) => {
+    const r = await profileApi.reset();
+    res.status(r.status).json(r.body);
+  });
+
+  console.log(`  [webview] control panel mounted at ${MOUNT}`);
 
   return {
     emit,
@@ -273,7 +263,6 @@ export function mountWebview(opts: WebviewOptions): WebviewHandle {
       if (partial.source) source = partial.source;
       if (partial.onSetActive) onSetActive = partial.onSetActive;
       if (partial.onSetMode) onSetMode = partial.onSetMode;
-      if (partial.onConsent) onConsent = partial.onConsent;
       if (typeof partial.active === 'boolean') active = partial.active;
     },
   };

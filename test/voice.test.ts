@@ -1,14 +1,14 @@
-// elevenlabs-map.test.ts — speed clamp 0.7–1.2; steady → stability/style;
+// voice.test.ts — speed clamp 0.7–1.2; steady → stability/style;
 // constant voice_id under FILM_MODE (the same-voice A/B rule).
 
 import { describe, expect, test } from 'bun:test';
-import { toSpeakOptions, LOW_PITCH_VOICE_ID } from '../src/audio/elevenlabs-map.ts';
-import { renderAudioSettings } from '../src/audio/render.ts';
+import { toSpeakOptions, LOW_PITCH_VOICE_ID } from '../src/toolkit-candidates/adapters/voice.ts';
+import { renderXRAudioSettings } from '../src/toolkit-candidates/xr-audio.ts';
 import type { AbilityModel } from '@ai4a11y/toolkit';
 import fixture from './fixtures/margaret.blob.json';
 
-const margaret = renderAudioSettings(fixture.abilityModel as AbilityModel);
-const baseline = renderAudioSettings(null);
+const margaret = renderXRAudioSettings(fixture.abilityModel as AbilityModel);
+const baseline = renderXRAudioSettings(null);
 
 describe('speed', () => {
   test('margaret 0.8 passes through', () => {
@@ -18,7 +18,7 @@ describe('speed', () => {
     expect(toSpeakOptions(margaret, { rateDelta: -0.2 }).voice_settings?.speed).toBe(0.7);
   });
   test('clamped at 1.2 ceiling', () => {
-    const fast = renderAudioSettings({ needs: [{ dimension: 'readAloudRate', value: 1.6, strength: 'preference' }] });
+    const fast = renderXRAudioSettings({ needs: [{ dimension: 'readAloudRate', value: 1.6, strength: 'preference' }] });
     expect(toSpeakOptions(fast).voice_settings?.speed).toBe(1.2);
   });
   test('repeat slowdown: 0.8 − 0.1 → 0.7', () => {
@@ -53,7 +53,7 @@ describe('volume', () => {
 });
 
 describe('voice_id — the same-voice A/B rule', () => {
-  const lowPitch = renderAudioSettings({ needs: [{ dimension: 'voicePitch', value: 'low', strength: 'preference' }] });
+  const lowPitch = renderXRAudioSettings({ needs: [{ dimension: 'voicePitch', value: 'low', strength: 'preference' }] });
 
   test('FILM_MODE: the configured voice, constant, in both renders', () => {
     const a = toSpeakOptions(baseline, { filmMode: true, voiceId: 'FILM_VOICE' });

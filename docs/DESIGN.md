@@ -30,7 +30,7 @@ engine) → `speak()` + HUD, with Mentra STT in, a skill registry
 until Start), and a deployed instance with a documented deploy flow. What it
 lacks is exactly what this demo adds: it runs on a **draft-era profile**
 (`wearable-profile.json` + a hand-rolled `read-aloud-preference.json`), not the
-toolkit's AbilityModel, grants, or consent machinery. The build is therefore a
+toolkit's AbilityModel. The build is therefore a
 **swap, not a green-field app**: replace the draft profile with the real toolkit
 core, add one skill per video.
 
@@ -64,10 +64,10 @@ hardcoded prompt + task brief (§5.2). The switch (`GUIDE_MODE=baseline`)
 controls exactly **two injection points**:
 
 - **Input** — toolkit mode appends a *profile block* to the prompt, derived from
-  Margaret's granted AbilityModel ("one action at a time, then stop and wait";
+  Margaret's AbilityModel ("one action at a time, then stop and wait";
   "short sentences, plain words"). Baseline sends the model the normal input.
 - **Output** — toolkit mode renders the answer through
-  `renderAudioSettings()` (0.8×, chunked, done-gated, captions). Baseline
+  `renderXRAudioSettings()` (0.8×, chunked, done-gated, captions). Baseline
   speaks the model's raw answer directly, at defaults.
 
 So the film's claim sharpens: not "a scripted app behaves differently," but
@@ -152,7 +152,7 @@ must not. "Repeat" replays the transcript verbatim, never regenerates.
 
 | Time | See | Hear |
 |---|---|---|
-| 1:00 | Phone panel mirrors the consent line | Glasses, **spoken consent** (the Consent port's `present`/`capture`, audio-first): "Appliance Guide would like to read your accessibility profile — needs and speech. Okay?" Margaret: "Yes." |
+| 1:00 | She taps **Toolkit** on the phone panel; her profile card appears | — (choosing Toolkit mode is the go-ahead: the app reads her profile straight away, nothing is asked) |
 | 1:05 | — | Margaret: "How do I start a wash?" |
 | 1:07 | Phone panel shows each line as large-text captions from here on | Glasses, **0.8×, warm**: "Sure. One step at a time. First: pull open the small drawer at the top left." |
 | 1:13 | She opens it | Margaret: "Done." |
@@ -172,10 +172,8 @@ Split screen, baseline freeze left / running machine right. Three caption beats:
    time, plain words."
 3. "Set up once. Works in any app that speaks toolkit." → collective end card.
 
-**Optional +10s beat** (the toolkit's most distinctive property): after the wash
-starts — Glasses: "You asked me to repeat earlier. Should I always go one step at
-a time on new appliances?" → proposal card on the phone panel → Accept. Real
-`importInsight` → consent-gated proposal: the system learns, never silently.
+An earlier version asked for spoken permission; this demo treats choosing
+Toolkit mode as permission.
 
 ## 5. The rig
 
@@ -189,9 +187,8 @@ One pipeline, two injection points — baseline is the same picture with the two
         ◆ = toolkit injection                                                        ▼
    Toolkit (same Bun process): Librarian · Margaret's AbilityModel (file store)
      onboarded once at :4000/onboarding ─► import-profile.mjs
-     requestGrant ─► spoken consent ─► exportAbilityModel ─► ◆ prompt block + ◆ renderAudioSettings
-     repeat pattern ─► importInsight ─► consent proposal (never silent)
-   panels: demo page + /webview ◄── captions · consent card · Done button · A/B toggle
+     Toolkit mode chosen ─► getAbilityModel ─► ◆ prompt directives + ◆ renderXRAudioSettings
+   panels: demo page + /webview ◄── captions · Done button · A/B toggle
 ```
 
 - **Reused as-is from the old draft's wearable**: transport (`rtmp.ts`,
@@ -201,11 +198,10 @@ One pipeline, two injection points — baseline is the same picture with the two
 - **Toolkit linked locally, consumed as-is**:
   `"@ai4a11y/toolkit": "file:../AI-for-Accessibility-Toolkit/toolkit"`
   (relative to the app repo at `~/mas/accessibility_collective/toolkitv2/wearable-extension/`)
-  — plain ESM, symlink-style install assumed. The app implements its four ports
-  from the `toolkit/platforms/node/` templates (`fileKV(dir)` — the file-backed
-  KV already exists there — pointed at the app data dir; `nodeClock` /
-  `nodeScheduler` as-is; `Consent` implemented as the spoken
-  `present`/`capture` flow).
+  — plain ESM, symlink-style install assumed. The app passes two ports:
+  `fileKV(dir)` from `toolkit/platforms/node/` — the file-backed KV already
+  exists there — pointed at the app data dir, and a clock. The rest keep the
+  toolkit's built-in defaults.
 - **Profile transfer respects single-writer stores**: the onboarding service
   and the glasses app each embed their own toolkit instance — they must never
   share a `DATA_DIR`. A ~20-line `import-profile.mjs` in the app opens the
@@ -213,7 +209,8 @@ One pipeline, two injection points — baseline is the same picture with the two
   and `importProfileBlob(blob)` into the app store — public API only, and it
   exercises the protocol-v1 blob path for real.
 - **Replaced by the toolkit**: `wearable-profile.json` → the Librarian;
-  `read-aloud-preference.json` hand-rolled learning → `importInsight` proposals;
+  `read-aloud-preference.json` hand-rolled learning → removed (this app only
+  reads the profile);
   the `SPEECH_STYLE` env var → `render.language.simplify`. The draft's
   situational skills (watch-your-step, ping, …) stay off via `WEARABLE_SKILLS`
   to keep the film clean.
@@ -229,8 +226,9 @@ One pipeline, two injection points — baseline is the same picture with the two
   Gemini in both takes** from the same hardcoded prompt + task brief. Nothing
   spoken is pre-authored — the toolkit changes only what enters the prompt and
   how the answer is delivered. Margaret's own words (`freeText`) never reach
-  the prompt: the profile block is built from the **granted** AbilityModel
-  slice only. The webview panel's step controls remain the film-day safety net.
+  the prompt: `readModel` (`src/toolkit/host.ts`) drops them before anything
+  else sees the profile, and the profile block is built from structured needs
+  only. The webview panel's step controls remain the film-day safety net.
 
 ### 5.1 TTS engine knobs — what is actually adjustable
 
@@ -288,7 +286,7 @@ The guidance is not scripted; Gemini generates it each turn. What IS hardcoded
   check).
 
 The only input-side difference is the **profile block** (toolkit mode only),
-derived mechanically from the granted AbilityModel + render — e.g. *"give
+derived mechanically from the AbilityModel + render — e.g. *"give
 exactly ONE action, then stop and wait for 'done' · sentences ≤ 18 words ·
 plain words, no jargon · a warm short confirmation before each next step."*
 Baseline gets no block and its raw answer goes straight to TTS. Determinism on
@@ -332,16 +330,16 @@ Two truths the film must respect, not paper over:
 Everything the demo needs works against the toolkit's current public API; the
 audio-specific pieces live in `wearable-extension`, not in `toolkit/`.
 
-### 7.1 `wearable-extension/src/audio-render.js`
+### 7.1 `wearable-extension/src/toolkit-candidates/xr-audio.ts`
 
-`renderAudioSettings(model)` — pure math over the AbilityModel, written in the
+`renderXRAudioSettings(model)` — built on the toolkit's `renderXRSettings` (rate, simplify, captions come from it), plus pure math over the AbilityModel, written in the
 style of `toolkit/surfaces/xr.js` (~60 lines + in-app unit tests). XR's renderer
 only carries `speech.rate` and `simplifyLanguage`; an audio-first surface needs
 delivery *shape*. Consumers beyond glasses: phone voice assistants, smart
 speakers — which is why it's a natural upstream PR once proven (§7.4).
 
-Its input-side sibling is **`src/toolkit/prompt-block.js`** —
-`profilePromptBlock(model, render)`, the pure function that turns the granted
+Its input-side sibling is **`src/toolkit-candidates/adapters/prompt-directives.ts`** —
+`profilePromptBlock(model, render)`, the pure function that turns the
 AbilityModel into the §5.2 prompt block. Output render and input block are the
 demo's two halves of "the toolkit adapts an intelligent model."
 
@@ -362,7 +360,7 @@ demo's two halves of "the toolkit adapts an intelligent model."
 The render stays **vendor-neutral**; a sibling module owns a tiny mapper, one
 pure function per engine:
 
-| renderAudioSettings | → ElevenLabs / Mentra `SpeakOptions` | → Gemini TTS |
+| renderXRAudioSettings | → ElevenLabs / Mentra `SpeakOptions` | → Gemini TTS |
 |---|---|---|
 | `speech.rate` 0.8 | `voice_settings.speed: 0.8` (clamped 0.7–1.2) | style line: "speak slowly" |
 | `speech.expressiveness` `steady` | `stability: 0.75, style: 0` | style line: "calm, even tone" |
@@ -397,17 +395,13 @@ Explicitly **not** new dimensions (derived instead): stability/style
 Voice *identity* (a preferred named voice) is a scoped setting
 (`recordScopedSettings`), not an ability need.
 
-### 7.3 The draft's learning loop, done properly
+### 7.3 The draft's learning loop — left out
 
-The draft already *learns* from the world — `read-text-aloud` measures how small
-the text she asked about was (`sizePct`, `kind`) and writes a legibility
-threshold to a JSON file, with a "copy it into the extension by hand" stub for
-the web side. That whole path is what `requestGrant` / `importInsight` /
-consent proposals exist for. The demo replaces the file with the real machinery,
-and the old stub becomes the actual cross-surface story: the wearable teaches
-the web extension her fine-print threshold **through the toolkit**, gated by her
-consent. Insight kinds: video 1 — repeated-repeat → propose stepwise/slower
-default; video 2 — measured legibility threshold → propose `read-aloud` scope.
+The draft *learned* from the world — `read-text-aloud` measured how small the
+text she asked about was (`sizePct`, `kind`) and wrote a legibility threshold
+to a JSON file. This demo drops that: the app only reads the profile and never
+writes to it. "Repeat" replays the step word for word (a second repeat of the
+same step a little slower, for that replay only) and changes nothing else.
 
 ### 7.4 Proposed toolkit follow-ups — separate, methodical, never blocking
 
@@ -416,12 +410,12 @@ mechanism for deferred, scoped work), to be filed as entries/PRs against
 `AI-for-Accessibility-Collective/AI-for-Accessibility-Toolkit` **after** the demo proves them.
 Filming depends on none of these.
 
-1. **`toolkit/surfaces/audio.js`** — upstream the proven `audio-render.js` as a
+1. **`toolkit/surfaces/audio.js`** — upstream the proven `xr-audio.ts` (see `src/toolkit-candidates/README.md`) as a
    first-class surface beside `web.js` / `xr.js`, with tests.
 2. **Vocabulary canonicalization** — register `pacing`, `voicePitch`,
    `spokenDetail` in the registry/vocabulary docs so other hosts discover them.
 3. **`toolkit/hosts/audio-demo/demo.js`** — the CI-runnable terminal proof
-   (onboard → grant → render → insight back), a copy of `xr-demo`, ~1 hour.
+   (onboard → read → render), modeled on `xr-demo`, ~1 hour.
 4. **Onboarding needs-capture** — the onboarding page derives needs only from
    per-area defaults and never parses free text; capturing `readAloudRate` /
    `pacing` (and labeling areas beyond raw ids) would remove the demo's seed
@@ -442,7 +436,7 @@ exists — verbatim, fast, every line. Toolkit: the same skill styled by the
 render — `gistFirst` + `readingLevel`: *"This bill says you owe forty dollars by
 March third. Want the details?"* Detail only on request.
 
-- Build cost ≈ ½ day: thread `renderAudioSettings` through the existing skill's
+- Build cost ≈ ½ day: thread `renderXRAudioSettings` through the existing skill's
   prompt (the `speechStyle` hook already exists in `compose.ts`).
 - Same timeline shape: setup 0:15 / baseline fails 0:45 / toolkit succeeds 0:45 /
   debrief 0:15.
@@ -451,9 +445,6 @@ March third. Want the details?"* Detail only on request.
   taxonomy's `finance` no-memory zone for this: zone assignment is web-domain
   based and nothing classifies a paper bill into it; wiring that up is a
   possible follow-up, not a claimable fact today.
-- Optional payoff shot: the measured text size flows back as an insight (§7.3)
-  and the *web extension* starts reading fine print for her — cross-surface, on
-  camera.
 - Props: fabricated bill only, never real mail.
 
 ## 9. Build and film plan — ≈6 build days; budget 8–9 wall-clock with rehearsal, filming, and slack
@@ -461,13 +452,13 @@ March third. Want the details?"* Detail only on request.
 | # | Task | Size |
 |---|---|---|
 | 1 | Create the **`wearable-extension`** repo from the old draft's `wearable/`; strip situational skills; link `"@ai4a11y/toolkit": "file:…"`; run `npm test` + the toolkit's `demo:xr` once to pin the version | ½ day |
-| 2 | Embed the toolkit (file-KV port from the `platforms/node` template, clock/scheduler, audio Consent `present`/`capture`); `GUIDE_MODE=baseline` switch; pass `SpeakOptions` through `mentra-io.ts` (one-line) | 1 day |
-| 3 | `src/audio-render.js` + `prompt-block.js` + the render→SpeakOptions / Gemini-style mappers + in-app unit tests | ½ day |
+| 2 | Embed the toolkit (file-KV port from the `platforms/node` template, clock); `GUIDE_MODE=baseline` switch; pass `SpeakOptions` through `mentra-io.ts` (one-line) | 1 day |
+| 3 | `xr-audio` + `prompt-directives` + the render→SpeakOptions / Gemini-style mappers + in-app unit tests | ½ day |
 | 4 | `task-guide` skill: guide policy over the request engine (task brief in, one-step turns, "done"/"repeat", transcript-replay repeat), one vision verification on the dial step | 1 day |
-| 5 | Onboard Margaret at `:4000/onboarding` (local mode); `import-profile.mjs --seed` (seed the full needs — §3 — then exportProfileBlob → importProfileBlob); `reset-take.mjs` (wipe + re-import between takes) | ½ day |
+| 5 | Onboard Margaret at `:4000/onboarding` (local mode); `import-profile.mjs --seed` (seed the full needs — §3 — then exportProfileBlob → importProfileBlob) | ½ day |
 | 6 | Video 2: thread the render through `read-text-aloud` (gist-first + readingLevel) | ½ day |
 | 7 | Rehearse both scripts hardware-free (`bun run demo`, webcam) | ½ day |
-| 8 | On-glasses dry run: RTMP reachability, STT of "done", TTS voice, consent flow | ½ day |
+| 8 | On-glasses dry run: RTMP reachability, STT of "done", TTS voice | ½ day |
 | 9 | Film both videos + debrief shots | 1 day |
 
 Risks → mitigations:
@@ -486,19 +477,12 @@ Risks → mitigations:
   takes, temperature ≈ 0.2, "repeat" replays the transcript verbatim, the
   speaker's chunk/gate guardrails cap a rambling answer in toolkit mode, and
   the §4 script is the rehearsal target, not a playback file.
-- *Participant* — real older adult with signed media consent (or a colleague's
+- *Participant* — real older adult with a signed media release (or a colleague's
   parent / actor for the public cut); over-shoulder framing if a face shouldn't
   appear. POV insets come free from the FrameStore.
 - *Two processes, one store* — the onboarding service and the app each embed
   their own toolkit over their own `DATA_DIR`; stores are single-writer, so
   never share one. The blob script is the only transfer path.
-- *Retakes vs. the consent machinery* — grant requests and insights are
-  proposals with dedup, decline cooldowns, and a **default cap of 3 proposals
-  per week**; a granted app returns `already-granted`. Every toolkit-mode
-  retake of the consent or insight beat therefore starts from
-  `reset-take.mjs` (wipe `APP_DATA_DIR`, re-import the blob). For long
-  rehearsal sessions, booting with the toolkit's `demo` port on lifts the
-  weekly cap — use it in rehearsal only, never in the filmed take.
 - *Toolkit drift while we build* — the `file:` link tracks the checkout; pin a
   commit of the cleaned repo for the build window and note it in
   `wearable-extension`'s README.

@@ -2,3 +2,5 @@
 data/
 node_modules/
 bench-out/
+runs/
+.tts-cache/

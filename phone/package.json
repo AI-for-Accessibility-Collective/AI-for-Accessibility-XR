@@ -1,0 +1,30 @@
+{
+  "name": "task-guide-phone",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "ios": "expo run:ios --device",
+    "android": "expo run:android --device",
+    "ios:release": "expo run:ios --device --configuration Release",
+    "android:release": "expo run:android --device --variant release",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mentra/bluetooth-sdk": "3.1.1",
+    "expo": "~55.0.24",
+    "expo-audio": "~55.0.14",
+    "expo-build-properties": "~55.0.14",
+    "expo-dev-client": "~55.0.34",
+    "expo-file-system": "~55.0.20",
+    "expo-keep-awake": "~55.0.4",
+    "expo-speech": "~55.0.8",
+    "react": "19.2.0",
+    "react-native": "0.83.10"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.10",
+    "typescript": "~5.9.2"
+  }
+}

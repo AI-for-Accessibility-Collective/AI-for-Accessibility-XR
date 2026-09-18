@@ -15,8 +15,5 @@ export interface TurnEngine {
   // One user turn → the model's reply text ('' when the model had nothing).
   // Turns are serialized per conversation; frames are optional context.
   turn(text: string, frames?: FrameEntry[]): Promise<string>;
-  // Replace the system instruction for FUTURE turns, keeping history — how an
-  // accepted insight updates the prompt block mid-conversation.
-  setSystemInstruction(si: string): void;
   reset(): void;
 }

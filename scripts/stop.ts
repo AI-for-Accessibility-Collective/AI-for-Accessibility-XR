@@ -29,7 +29,7 @@ export interface Proc {
 }
 
 const APP_COMMAND =
-  /(?:^|[\s/])(?:src\/scripts\/drive-core\.ts|src\/index\.ts|scripts\/check\.ts|scripts\/bench-models\.ts|scripts\/import-profile\.mjs|scripts\/reset-take\.mjs|src\/scripts\/probe-live-video\.ts)\b|\bbun (?:run|--hot) (?:demo|start|dev|check)\b/;
+  /(?:^|[\s/])(?:src\/scripts\/drive-core\.ts|src\/index\.ts|scripts\/check\.ts|scripts\/bench-models\.ts|scripts\/import-profile\.mjs|src\/scripts\/probe-live-video\.ts)\b|\bbun (?:run|--hot) (?:demo|start|dev|check)\b/;
 const VIDEO_READER = /\bffmpeg\b.*\bimage2pipe\b/;
 
 export function underRoots(path: string | null, roots: string[]): boolean {

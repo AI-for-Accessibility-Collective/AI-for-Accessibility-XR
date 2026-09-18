@@ -15,7 +15,7 @@
 // touches ./data, the onboarding service's store, or the toolkit.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { AbilityModel } from '@ai4a11y/toolkit';
@@ -24,9 +24,9 @@ import { generateContent } from '../src/engine/gemini-rest.ts';
 import { createConversation, TURN_MAX_OUTPUT_TOKENS } from '../src/engine/request-engine.ts';
 import { VisionClient } from '../src/engine/vision.ts';
 import { synthesizeSpeech } from '../src/engine/tts.ts';
-import { renderAudioSettings } from '../src/audio/render.ts';
-import { styleLine } from '../src/audio/gemini-style.ts';
-import { profilePromptBlock } from '../src/toolkit/prompt-block.ts';
+import { renderXRAudioSettings } from '../src/toolkit-candidates/xr-audio.ts';
+import { styleLine } from '../src/toolkit-candidates/adapters/voice.ts';
+import { profilePromptBlock } from '../src/toolkit-candidates/adapters/prompt-directives.ts';
 import { BASE_PERSONA, composePrompt } from '../src/skills/compose.ts';
 import { readVisibleText } from '../src/skills/builtin/read-text-aloud.ts';
 import { parseVerifyAnswer, verifyQuestion, VERIFY_MAX_OUTPUT_TOKENS } from '../src/skills/builtin/task-guide.ts';
@@ -234,7 +234,7 @@ await check('unit tests', () => {
 await check("toolkit's own XR demo", () => {
   const r = run('node', ['node_modules/@ai4a11y/toolkit/hosts/xr-demo/demo.js']);
   return r.code === 0 && r.out.includes('Cross-surface loop complete')
-    ? pass('grant → export → insight → accept loop, from the installed toolkit')
+    ? pass("the toolkit's cross-surface loop runs from the installed package")
     : fail(lastLine(r.out));
 });
 
@@ -253,13 +253,6 @@ await check("toolkit's own XR demo", () => {
       return r.out.includes('exactly the four demo needs')
         ? pass("cleaned repo's fileStore + createToolkitHost → blob → app store")
         : fail(lastLine(r.out));
-    });
-    await check('retake reset', () => {
-      const leftover = join(tmp, 'app', 'left-from-last-take.json');
-      writeFileSync(leftover, '{}');
-      const r = run('bun', ['scripts/reset-take.mjs', '--to', join(tmp, 'app')]);
-      if (existsSync(leftover)) return fail('the store was not wiped — state from the last take would survive');
-      return r.out.includes('pre-consent state restored') ? pass('store wiped · fixture re-imported') : fail(lastLine(r.out));
     });
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -348,7 +341,7 @@ const liveSkipReason = OFFLINE ? '--offline' : !config.geminiApiKey ? 'GEMINI_AP
 
 const task = washingMachine as Task;
 const margaret = fixture.abilityModel as AbilityModel;
-const render = renderAudioSettings(margaret);
+const render = renderXRAudioSettings(margaret);
 const toolkitTaskPrompt = composePrompt({ task, profileBlock: profilePromptBlock(margaret, render) });
 const OPEN = 'Hello? Can you help me start the washing machine? I want to wash my cottons at forty degrees.';
 
@@ -561,8 +554,8 @@ async function runRig(): Promise<void> {
     await beat('rig boots', async () => {
       const inUse = await fetch(`${base}/status`).then(() => true, () => false);
       if (inUse) return fail(`port ${RIG_DEMO_PORT} is already serving something — stop it first`);
-      const reset = run('bun', ['scripts/reset-take.mjs', '--to', dataDir]);
-      if (!reset.out.includes('pre-consent state restored')) return fail(`fixture import failed: ${lastLine(reset.out)}`);
+      const imported = run('bun', ['scripts/import-profile.mjs', '--fixture', '--to', dataDir]);
+      if (!imported.out.includes('exactly the four demo needs')) return fail(`fixture import failed: ${lastLine(imported.out)}`);
       child = spawn('bun', ['src/scripts/drive-core.ts'], {
         cwd: ROOT,
         env: {
@@ -609,41 +602,18 @@ async function runRig(): Promise<void> {
       return joined(again) === joined(baseline) ? pass('identical transcript replay') : fail(`replay differed: "${clip(joined(again), 50)}"`);
     });
 
-    // POST /mode resolves only when the consent beat has finished, so it is
-    // left running while the question is asked and answered.
-    let modeRequest: Promise<Response> | null = null;
-    let modeFinished = false;
-    await beat('toolkit: consent question spoken', async () => {
+    await beat('toolkit: switching on adapts at once', async () => {
       const from = speaks.length;
-      modeRequest = post('/mode', { mode: 'toolkit' }).finally(() => {
-        modeFinished = true;
-      });
-      const card = await waitFor(async () => ((await state()).consentCard?.kind === 'grant' ? true : null), 20_000);
-      if (!card) return fail('no permission card within 20 s');
-      const asked = await waitFor(async () => speaks.slice(from).find((s) => /accessibility profile/i.test(s.text)) ?? null, 15_000);
-      return asked ? pass('question spoken + permission card shown') : fail('card shown but the question was never spoken');
-    });
-
-    await beat('toolkit: "yes" while listening grants', async () => {
-      // Wait until the guide is actually listening for the answer, so the yes
-      // is proven to travel the path a wearer's spoken answer takes.
-      const listening = await waitFor(async () => ((await state()).listening ? true : null), 40_000);
-      if (!listening) {
-        return fail(modeFinished ? 'the consent beat ended without ever listening for an answer' : 'the guide never started listening for an answer');
-      }
-      const answeredAt = Date.now();
-      await post('/say', { text: 'Yes, please go ahead.' });
-      const s = await waitFor(async () => {
-        const st = await state();
-        return st.granted && !st.consentCard ? st : null;
-      }, 10_000);
-      if (!s) return fail('grant not minted within 10 s of answering');
-      const res = await (modeRequest as Promise<Response> | null);
-      if (!res || res.status !== 204) return fail(`the mode switch answered HTTP ${res?.status ?? 'nothing'}`);
+      const t0 = Date.now();
+      const res = await post('/mode', { mode: 'toolkit' });
+      if (res.status !== 204) return fail(`the mode switch answered HTTP ${res.status}`);
+      const s = await state();
+      if (s.mode !== 'toolkit' || !s.profileOn) return fail(`after the switch: mode ${s.mode} · profile ${s.profileOn ? 'on' : 'off'}`);
       if (s.rate !== 0.8 || s.deliveryMode !== 'stepwise' || !s.captionsMirror) {
         return fail(`render wrong: rate ${s.rate} · ${s.deliveryMode} · captions ${s.captionsMirror}`);
       }
-      return pass(`granted ${((Date.now() - answeredAt) / 1000).toFixed(1)} s after the answer → 0.8× · stepwise · captions`);
+      if (speaks.length !== from) return fail(`the guide spoke during the switch: "${clip(joined(speaks.slice(from)), 50)}"`);
+      return pass(`profile read in ${Date.now() - t0} ms, nothing asked → 0.8× · stepwise · captions`);
     });
 
     let step1: Speak[] = [];
@@ -671,33 +641,14 @@ async function runRig(): Promise<void> {
         : fail(`got "${clip(joined(again), 50)}" at ${again.map((s) => s.rate).join('/')}`);
     });
 
-    await beat('toolkit: 2nd repeat slows + suggests', async () => {
+    await beat('toolkit: 2nd repeat, same words, slower', async () => {
       const again = await say('Can you say that again?');
-      const slowed = again.filter((s) => s.slower);
-      if (!slowed.length || !slowed.every((s) => s.rate === 0.7)) {
+      if (joined(again) !== joined(step2)) return fail(`replay differed: "${clip(joined(again), 50)}"`);
+      if (!again.every((s) => s.slower && s.rate === 0.7)) {
         return fail(`no 0.70× slowed replay (got ${again.map((s) => `${s.rate}${s.slower ? ' slower' : ''}`).join(', ') || 'nothing'})`);
       }
-      const card = await waitFor(async () => {
-        const st = await state();
-        return st.consentCard?.kind === 'insight' ? st.consentCard : null;
-      }, 25_000);
-      return card ? pass(`0.70× replay → suggestion: "${clip(card.body, 44)}"`) : fail('slowed replay happened but no suggestion card');
-    });
-
-    await beat('toolkit: accepting applies 0.7×', async () => {
-      const listening = await waitFor(async () => ((await state()).listening ? true : null), 30_000);
-      if (!listening) return fail('the suggestion never listened for an answer');
-      await post('/consent', { response: 'accept' });
-      const s = await waitFor(async () => {
-        const st = await state();
-        return st.rate === 0.7 ? st : null;
-      }, 20_000);
-      if (!s) return fail('rate still not 0.7 after accepting');
-      const need = s.needs.find((n: any) => n.dimension === 'readAloudRate');
-      const next = await say('done');
-      return next.length && next.every((x) => x.rate === 0.7)
-        ? pass(`readAloudRate ${need?.value} (${need?.source}) · next step at 0.70×`)
-        : fail(`next step spoken at ${next.map((x) => x.rate).join('/') || 'nothing'}`);
+      const s = await state();
+      return s.rate === 0.8 ? pass('identical transcript at 0.70× · the profile itself still says 0.8×') : fail(`the profile rate changed to ${s.rate}`);
     });
   } finally {
     (child as ChildProcess | null)?.kill('SIGTERM');

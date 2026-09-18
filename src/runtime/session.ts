@@ -1,32 +1,26 @@
 // createSession — the runtime state machine (docs/PLAN.md §3.5). Replaces
 // the old draft's 458-line orchestrator with the guide's actual shape:
 //
-//   utterance → [consent answer?] → [stop|repeat|done] → [read request]
+//   utterance → [stop|repeat|done] → [read request]
 //             → [scripted task trigger] → [any other "help me…" task]
 //             → free conversation turn
 //
 // and one mode switch, setMode('baseline'|'toolkit'), which is the entire
-// A/B: toolkit mode runs ensureGrant (the spoken-consent beat) → readModel →
+// A/B: choosing toolkit mode reads the profile straight away (readModel) →
 // render + prompt block; baseline is render(null) and no block. The same
 // engine generates every reply in both modes.
 //
 // Every public method resolves — never rejects. Hosts fire them from mic and
 // HTTP callbacks without awaiting, and in Bun an unhandled rejection ends the
 // process: one rate-limited model call must not take down a take.
-//
-// A consent card moves through phases: 'asking' (the question is being
-// spoken — a bare yes/no counts), 'listening' (capture holds the next
-// utterance), and 'tap-only' (nobody answered in time; only a panel tap can
-// answer, so a later "okay" meant for a step is never taken as consent).
 
 import type { FrameStore, FrameEntry } from '../transport/frames.ts';
 import type { VisionClient } from '../engine/vision.ts';
 import type { TurnEngine } from '../engine/engine.ts';
 import type { Speaker } from '../audio/speaker.ts';
-import { renderAudioSettings, type AudioRender } from '../audio/render.ts';
-import { profilePromptBlock } from '../toolkit/prompt-block.ts';
-import { ensureGrant, isPending, readModel, proposeInsight, type GuideToolkit } from '../toolkit/host.ts';
-import { parseBareConsentAnswer, type ConsentCard } from '../toolkit/consent-audio.ts';
+import { renderXRAudioSettings, type XRAudioSettings } from '../toolkit-candidates/xr-audio.ts';
+import { profilePromptBlock } from '../toolkit-candidates/adapters/prompt-directives.ts';
+import { readModel, type GuideToolkit } from '../toolkit/host.ts';
 import { composePrompt } from '../skills/compose.ts';
 import { matchesTask, type Task } from '../skills/types.ts';
 import {
@@ -47,7 +41,7 @@ import type { AbilityModel } from '@ai4a11y/toolkit';
 export type GuideMode = 'baseline' | 'toolkit';
 
 export interface SessionEvent {
-  type: 'user' | 'assistant' | 'status' | 'hud' | 'learn';
+  type: 'user' | 'assistant' | 'status' | 'hud';
   text: string;
   ts: number;
   skill?: string;
@@ -59,14 +53,12 @@ export interface PanelBus {
 
 export interface SessionState {
   mode: GuideMode;
-  granted: boolean;
+  // True when toolkit mode has read a profile and is adapting to it.
+  profileOn: boolean;
   needs: Array<{ dimension: string; value: unknown; source?: string }>;
   captionsMirror: boolean;
   rate: number;
   deliveryMode: 'continuous' | 'stepwise';
-  consentCard: ConsentCard | null;
-  // True while a consent question is waiting for the wearer's spoken answer.
-  listening: boolean;
   task: { id: string; active: boolean; stepCount: number } | null;
   paused: boolean;
   switching: boolean;
@@ -84,21 +76,18 @@ export interface SessionDeps {
 }
 
 export interface Session {
-  // Resolves once the switch — including a consent question and any switch
-  // requested meanwhile — has finished.
+  // Resolves once the switch — and any switch requested meanwhile — has
+  // finished.
   setMode(mode: GuideMode): Promise<void>;
+  // The profile in the store changed (the panels' editor): in toolkit mode,
+  // re-read it and adapt from the next turn on. Baseline ignores it — the
+  // store is read only when Toolkit mode is chosen.
+  refreshProfile(): Promise<void>;
   onUtterance(text: string): Promise<void>;
-  // Panel tap on the consent card ('accept' | 'declineOnce').
-  respondConsent(response: 'accept' | 'declineOnce'): Promise<void>;
-  // The speaker's repeat-pattern hook lands here (wired by the host).
-  onRepeatPattern(info: { stepId: string | null; count: number }): void;
   setPaused(paused: boolean): void;
-  // consent-audio's io half: show/clear the card; await the wearer's answer.
-  setCard(card: ConsentCard | null): void;
-  waitAnswer(timeoutMs: number): Promise<string | null>;
   state(): SessionState;
   mode(): GuideMode;
-  render(): AudioRender;
+  render(): XRAudioSettings;
 }
 
 const DONE_RE = /^(done|next|ok(ay)?,? ?(done|next)?|i'?m done|finished|it'?s done|got it)[.!]?$/i;
@@ -111,33 +100,27 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).s
 export function createSession(deps: SessionDeps): Session {
   let mode: GuideMode = deps.initialMode ?? 'baseline';
   let model: AbilityModel | null = null;
-  let render: AudioRender = renderAudioSettings(null);
+  let render: XRAudioSettings = renderXRAudioSettings(null);
   let block = '';
   let chat: TurnEngine | null = null;
   let guide: TaskGuide | null = null;
   let guideEngine: TurnEngine | null = null;
   let activeTask: Task | null = null;
-  let card: ConsentCard | null = null;
-  let cardPhase: 'asking' | 'listening' | 'tap-only' | null = null;
   let paused = false;
   let switching = false;
   let switchPromise: Promise<void> = Promise.resolve();
-  // A mode requested while a switch (and its consent question) is running.
-  let pendingMode: GuideMode | null = null;
+  // A mode requested while a switch is still running (the profile read is
+  // async); the running switch applies it before its promise resolves.
+  let queuedMode: GuideMode | null = null;
   // Bumped on every mode request: work started under an older generation
-  // (a model reply still being written, an insight beat) must not speak or
-  // apply anything afterwards.
+  // (a model reply still being written) must not speak afterwards.
   let modeGen = 0;
-  let insightProposed = false;
-  // Each conversation answer gets its own repeat id, so "the same line twice"
-  // (the slow-down trigger) means the same line, not any two answers.
+  // Each conversation answer gets its own repeat id, so the speaker's
+  // per-line repeat count means the same line, not any two answers.
   let chatTurns = 0;
   // Briefs the model wrote, by request. Kept across mode switches on purpose:
   // the baseline take and the toolkit take of one request read the same brief.
   const briefs = new Map<string, Task>();
-
-  // The one pending "wearer's next answer" waiter (consent capture).
-  let answerWaiter: { resolve: (t: string | null) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
   const status = (text: string) => deps.panel.emit({ type: 'status', text, ts: Date.now() });
 
@@ -147,39 +130,9 @@ export function createSession(deps: SessionDeps): Session {
 
   function applyModel(m: AbilityModel | null): void {
     model = m;
-    render = renderAudioSettings(m);
+    render = renderXRAudioSettings(m);
     block = m ? profilePromptBlock(m, render) : '';
     deps.speaker.setRender(render);
-    chat?.setSystemInstruction(chatInstruction());
-    if (guideEngine && activeTask) {
-      guideEngine.setSystemInstruction(composePrompt({ task: activeTask, profileBlock: block }));
-    }
-  }
-
-  async function refreshModel(): Promise<void> {
-    if (!deps.tk || mode !== 'toolkit') return;
-    const m = await readModel(deps.tk);
-    if (mode !== 'toolkit') return; // switched to baseline while reading
-    applyModel(m);
-  }
-
-  function settleWaiter(value: string | null, timedOut = false): void {
-    if (!answerWaiter) return;
-    const w = answerWaiter;
-    answerWaiter = null;
-    clearTimeout(w.timer);
-    // After an answer capture may re-ask (the question is live again); after
-    // silence the card is left for a tap only.
-    if (card) cardPhase = timedOut ? 'tap-only' : 'asking';
-    w.resolve(value);
-  }
-
-  // Close any open consent question: the card disappears and a listening
-  // capture hears "no answer", so ensureGrant / the insight beat finish now.
-  function cancelConsent(): void {
-    card = null;
-    cardPhase = null;
-    settleWaiter(null);
   }
 
   const visionVerify =
@@ -212,7 +165,7 @@ export function createSession(deps: SessionDeps): Session {
       say: (t, o) => (gen === modeGen && guide === created ? deps.speaker.say(t, o) : Promise.resolve()),
     });
     guide = created;
-    status(`Task: ${task.goal} · ${render.delivery.mode === 'stepwise' ? "one step at a time — say 'done' to advance" : 'full walkthrough'}`);
+    status(`Task: ${task.goal} · ${render.delivery.mode === 'stepwise' ? 'one step at a time' : 'full walkthrough'}`);
     await created.start(utterance);
   }
 
@@ -279,11 +232,9 @@ export function createSession(deps: SessionDeps): Session {
   function setMode(next: GuideMode): Promise<void> {
     modeGen++;
     if (switching) {
-      // A toggle (or Reset take) while the consent question is open must not
-      // be dropped: close the question, and let the running switch apply the
-      // latest request before its promise resolves.
-      pendingMode = next;
-      cancelConsent();
+      // A toggle while a switch is still running must not be dropped: the
+      // running switch applies the latest request before its promise resolves.
+      queuedMode = next;
       return switchPromise;
     }
     switchPromise = switchTo(next);
@@ -293,25 +244,21 @@ export function createSession(deps: SessionDeps): Session {
   async function switchTo(next: GuideMode): Promise<void> {
     switching = true;
     try {
-      cancelConsent(); // a card left from an unanswered question belongs to the old mode
-      deps.speaker.reset(); // a take's repeat counts must not leak into the next mode
+      deps.speaker.reset(); // one take's repeat memory must not leak into the next mode
       guide = null;
       guideEngine = null;
       activeTask = null;
       chat = null;
-      insightProposed = false;
       mode = next;
       if (next === 'toolkit' && deps.tk) {
-        status('Toolkit mode — checking profile access…');
-        const grant = await ensureGrant(deps.tk);
-        if (grant === 'granted') {
-          applyModel(await readModel(deps.tk));
-          const n = model?.needs?.length ?? 0;
-          status(`Profile granted · ${n} need${n === 1 ? '' : 's'} · rate ${render.speech.rate}× · ${render.delivery.mode}`);
-        } else {
-          applyModel(null);
-          status(grant === 'declined' ? 'Profile access declined — running with defaults' : 'Profile access pending — tap the card to answer');
-        }
+        // Choosing Toolkit mode is the go-ahead: read the profile and adapt.
+        applyModel(await readModel(deps.tk));
+        const n = model?.needs?.length ?? 0;
+        status(
+          model
+            ? `Toolkit mode — profile read · ${n} need${n === 1 ? '' : 's'} · rate ${render.speech.rate}× · ${render.delivery.mode}`
+            : 'Toolkit mode — no profile in the store, running with defaults',
+        );
       } else {
         applyModel(null);
         status(next === 'toolkit' ? 'Toolkit mode requested but no toolkit store — running baseline' : 'Baseline mode — raw model output, default delivery');
@@ -322,71 +269,38 @@ export function createSession(deps: SessionDeps): Session {
     } finally {
       switching = false;
     }
-    const again = pendingMode;
-    pendingMode = null;
-    if (again && (again !== mode || (again === 'toolkit' && !model))) {
+    const again = queuedMode;
+    queuedMode = null;
+    if (again && again !== mode) {
       modeGen++;
       await switchTo(again);
     }
   }
 
-  async function respondConsent(response: 'accept' | 'declineOnce'): Promise<void> {
-    // A listening capture wins: feed it the literal the parser maps back.
-    if (answerWaiter) {
-      settleWaiter(response === 'accept' ? 'yes' : 'not now');
-      return;
-    }
-    if (!card || !deps.tk) return;
-    const { id, kind } = card;
-    card = null;
-    cardPhase = null;
+  // Same read as choosing Toolkit mode, without the reset a switch does: the
+  // delivery (speaker render) changes at once, and the conversation engine
+  // is dropped so its next turn is built with the new prompt block. A task
+  // already under way keeps the engine it started with — its prompt and
+  // pacing were fixed when the task began — and picks the change up on the
+  // next task.
+  async function refreshProfile(): Promise<void> {
+    if (mode !== 'toolkit' || !deps.tk || switching) return;
     try {
-      const res = await deps.tk.librarian.respondToProposal(id, response);
-      if (!res.ok) {
-        status(`Consent response failed: ${res.reason ?? 'unknown'}`);
-        return;
-      }
-      if (response === 'accept') {
-        await refreshModel();
-        if (kind === 'grant') status('Profile access granted');
-        else if (mode === 'toolkit') {
-          deps.panel.emit({
-            type: 'learn',
-            text: `Applied: speaking rate is now ${render.speech.rate}× — profile updated with your consent`,
-            ts: Date.now(),
-          });
-        }
-      } else {
-        status('Okay — leaving things as they are');
-      }
+      applyModel(await readModel(deps.tk));
+      chat = null;
+      const n = model?.needs?.length ?? 0;
+      status(
+        `Profile updated · ${n} need${n === 1 ? '' : 's'} · rate ${render.speech.rate}× · ${render.delivery.mode}` +
+          (guide?.active ? ' · the running task keeps its pacing until the next one' : ''),
+      );
     } catch (e) {
-      status(`Consent response failed: ${errorText(e)}`);
+      status(`Profile re-read failed — keeping the last one: ${errorText(e)}`);
     }
   }
 
   async function onUtterance(text: string): Promise<void> {
     const clean = text.trim();
     if (!clean) return;
-
-    // 1. A listening consent capture consumes the next utterance outright.
-    if (answerWaiter) {
-      deps.panel.emit({ type: 'user', text: clean, ts: Date.now() });
-      settleWaiter(clean);
-      return;
-    }
-
-    // 2. While a consent question is being spoken (capture not yet
-    //    listening), a bare yes/no answers it. Consent costs no model call, so
-    //    this works while paused too — the boot-time question is asked before
-    //    anyone presses Start. Stop and done are never taken as answers.
-    const isControl = STOP_RE.test(clean) || (!!guide?.active && render.delivery.confirmToAdvance && DONE_RE.test(clean));
-    if (card && cardPhase === 'asking' && !isControl) {
-      const bare = parseBareConsentAnswer(clean);
-      if (bare) {
-        deps.panel.emit({ type: 'user', text: clean, ts: Date.now() });
-        return respondConsent(bare);
-      }
-    }
 
     if (paused) {
       status('Press Start to begin');
@@ -396,7 +310,7 @@ export function createSession(deps: SessionDeps): Session {
     deps.panel.emit({ type: 'user', text: clean, ts: Date.now() });
 
     try {
-      // 3. Deterministic controls — never sent to the model.
+      // 1. Deterministic controls — never sent to the model.
       if (STOP_RE.test(clean)) {
         deps.speaker.stop();
         guide?.stop();
@@ -415,14 +329,14 @@ export function createSession(deps: SessionDeps): Session {
         return;
       }
 
-      // 4. Read request (video 2) — before task triggers, so "what does this
+      // 2. Read request (video 2) — before task triggers, so "what does this
       //    letter say?" held up to a bill reads it rather than starting a task.
       if (isReadRequest(clean)) {
         await handleRead(clean);
         return;
       }
 
-      // 5. Scripted task trigger — when no task is running, or only a
+      // 3. Scripted task trigger — when no task is running, or only a
       //    script-free one is (its manual makes the script the better guide).
       if (!guide?.active || activeTask?.id === GENERIC_TASK_ID) {
         const task = deps.tasks.find((t) => matchesTask(t, clean));
@@ -441,7 +355,7 @@ export function createSession(deps: SessionDeps): Session {
         return;
       }
 
-      // 6. Mid-task question or free conversation.
+      // 4. Mid-task question or free conversation.
       if (guide?.active) {
         await guide.ask(clean);
         return;
@@ -458,108 +372,24 @@ export function createSession(deps: SessionDeps): Session {
     }
   }
 
-  function onRepeatPattern(_info: { stepId: string | null; count: number }): void {
-    if (mode !== 'toolkit' || !deps.tk || !model || insightProposed) return;
-    insightProposed = true;
-    const currentRate = render.speech.rate;
-    const slower = Math.max(0.7, Math.round((currentRate - 0.1) * 10) / 10);
-    if (slower >= currentRate) return;
-    // Change only the rate need. Writing the whole needs array would pass
-    // every need through the toolkit's cross-app cap and silently downgrade
-    // the user's floor needs to preferences. (Export order matches the stored
-    // array; the export drops only malformed entries.)
-    const needs = model.needs ?? [];
-    const index = needs.findIndex((n) => n.dimension === 'readAloudRate');
-    const rateNeed = {
-      ...(index >= 0 ? needs[index]! : { dimension: 'readAloudRate', strength: 'preference' as const }),
-      value: slower,
-      source: 'wearable-extension-insight',
-    };
-    const gen = modeGen;
-    const stale = () => gen !== modeGen || mode !== 'toolkit';
-    void (async () => {
-      const tk = deps.tk!;
-      const proposal = await proposeInsight(
-        tk,
-        'speech.readAloudRate',
-        { op: 'profile-set', path: `fields.needs.${index >= 0 ? index : needs.length}`, value: rateNeed },
-        `You asked me to repeat that step twice. Want me to speak a little slower from now on — ${slower} times speed?`,
-        'Speak a bit slower',
-      );
-      if (!proposal) {
-        insightProposed = false; // machinery said not now (cap/dedup) — allow a later retry
-        return;
-      }
-      if (stale() || !tk.consent.present || !tk.consent.capture) return;
-      await tk.consent.present({ type: 'cross-app-insight', proposal });
-      // Answered while the suggestion was still being spoken — respondConsent
-      // has already applied it. Listening now would swallow the next sentence.
-      if (stale() || !(await isPending(tk, proposal.id))) return;
-      const answer = await tk.consent.capture(proposal.id);
-      if (!answer) {
-        // Nobody answered: withdraw the suggestion rather than leave a card up
-        // that a later "okay" for a step could be mistaken for.
-        if (card?.id === proposal.id) {
-          card = null;
-          cardPhase = null;
-        }
-        return;
-      }
-      if (stale() || !(await isPending(tk, proposal.id))) return;
-      card = null;
-      cardPhase = null;
-      const res = await tk.librarian.respondToProposal(proposal.id, answer);
-      if (res.ok && answer === 'accept') {
-        await refreshModel();
-        deps.panel.emit({
-          type: 'learn',
-          text: `Applied: speaking rate is now ${render.speech.rate}× — profile updated with your consent`,
-          ts: Date.now(),
-        });
-      } else if (res.ok) {
-        status('Okay — keeping the current pace');
-      }
-    })().catch((e) => status(`Insight beat failed: ${errorText(e)}`));
-  }
-
   return {
     setMode,
+    refreshProfile,
     onUtterance,
-    respondConsent,
-    onRepeatPattern,
 
     setPaused(p: boolean): void {
       paused = p;
       if (p) deps.speaker.stop();
     },
 
-    setCard(c: ConsentCard | null): void {
-      card = pendingMode ? null : c;
-      cardPhase = card ? 'asking' : null;
-    },
-
-    waitAnswer(timeoutMs: number): Promise<string | null> {
-      // Capture only waits while a consent card is up. If the card is gone,
-      // someone already answered it (or the mode is changing).
-      if (!card || pendingMode) return Promise.resolve(null);
-      settleWaiter(null); // a newer waiter replaces an older one
-      cardPhase = 'listening';
-      return new Promise<string | null>((resolve) => {
-        const timer = setTimeout(() => settleWaiter(null, true), timeoutMs);
-        answerWaiter = { resolve, timer };
-      });
-    },
-
     state(): SessionState {
       return {
         mode,
-        granted: model != null,
+        profileOn: model != null,
         needs: (model?.needs ?? []).map((n) => ({ dimension: n.dimension, value: n.value, source: n.source })),
         captionsMirror: render.captionsMirror,
         rate: render.speech.rate,
         deliveryMode: render.delivery.mode,
-        consentCard: card,
-        listening: answerWaiter != null,
         task: activeTask ? { id: activeTask.id, active: guide?.active ?? false, stepCount: guide?.stepCount ?? 0 } : null,
         paused,
         switching,
@@ -570,7 +400,7 @@ export function createSession(deps: SessionDeps): Session {
       return mode;
     },
 
-    render(): AudioRender {
+    render(): XRAudioSettings {
       return render;
     },
   };

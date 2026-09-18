@@ -1,9 +1,9 @@
-# wearable-extension — Appliance Guide
+# wearable-extension — Wearable Task Guide
 
 An audio-first smart-glasses guide (MentraOS) that walks a person through a
 household task and reads what they are looking at. The guidance is generated
 live by Gemini. The AI for Accessibility Toolkit adapts it to the person's
-consented accessibility profile — and the demo films the **same app twice**,
+accessibility profile — and the demo films the **same app twice**,
 once without that adaptation (Baseline) and once with it (Toolkit). That
 contrast is the film (`docs/DESIGN.md`).
 
@@ -36,71 +36,99 @@ On the page:
 2. Flip the switch to **▶ Start**. Gemini only runs while it is on.
 3. Say or type *"help me start the washing machine"*.
    **Baseline** answers in one long paragraph at normal speed.
-4. Click **Toolkit**. The guide asks, out loud, for permission to use the
-   profile — say *"yes"*. Now it gives **one step at a time**, slower, with
-   captions. Say *"done"* (or press **✓ Done**) for the next step, *"repeat"*
-   to hear a step again.
-5. Between Toolkit takes run `bun run reset:take` — it puts the profile back
-   to the pre-consent state so the permission question happens again.
+4. Click **Toolkit**. A take runs in one mode, so if the guide is Live a
+   pop-up pauses it first — confirm, then flip **▶ Start** again. The guide
+   reads the profile straight away. Now it gives **one step at a time**,
+   slower, with captions. Say *"done"* (or press **✓ Done**) for the next
+   step, *"repeat"* to hear a step again.
 
 Any other task works the same way: *"help me start the dishwasher"* makes the
 model write a short brief first, and both modes then use that same brief.
 Wear headphones if you can — the mic can hear the guide's own voice.
 
-## 2. Run on the glasses (Mentra)
+## 2. Run on the glasses (Mentra Live)
 
-You need Mentra glasses paired to the MentraOS phone app and a Mentra developer
-console account. The app runs on the server behind
-**https://a11y.attunemitserver.dev** (GCP VM `attune-server`) — no tunnel, and
-the glasses don't need to share a network with anything: they stream their
-camera to the server over the internet; the app tells them to.
+Three pieces, and only the first is yours to carry:
 
-1. **Console app.** The app's public URL in the Mentra console is
-   `https://a11y.attunemitserver.dev`, with the permissions in
-   `app_config.json` (microphone, camera). The phone panel is
-   https://a11y.attunemitserver.dev/webview.
-2. **Deploy.**
+```
+glasses ⇄ Bluetooth ⇄ phone app (phone/) ⇄ internet ⇄ guide server (src/)
+glasses ────────── camera, over Wi-Fi ──────────────▶ guide server
+```
 
-   ```bash
-   bun run deploy        # uploads this repo + the sibling toolkit, restarts the service
-   ```
+- The **phone app** (`phone/`, React Native on Mentra's **Bluetooth SDK**) holds
+  the link to the glasses. It forwards the glasses microphone to the server,
+  plays the guide's voice (the phone routes it to the glasses speaker), and
+  tells the glasses where to send their camera. It replaces the Mentra app for
+  this demo — Mentra's cloud SDK, developer console and tunnels are not used.
+- The **guide server** (this repo's `src/`) runs behind
+  **https://a11y.attunemitserver.dev** (GCP VM `attune-server`). It turns speech
+  into text, runs Gemini and the toolkit, and makes the voice.
 
-   On the server the app lives in `~/a11y-toolkit/wearable-extension` (toolkit
-   beside it, as here) and runs as the systemd service `wearable-a11y`; nginx
-   forwards the URL to it. Deploying never touches the server's `.env` or
-   `data/`. The server `.env` differs from `.env.example` in:
+### One-time setup
+
+1. **Update the glasses.** The Bluetooth SDK (3.1.1) only works with the
+   matching Mentra Live software. Follow
+   [Update Mentra Live](https://docs.mentraglass.com/bluetooth-sdk/software-update)
+   once.
+2. **Server.** `bun run deploy` uploads this repo + the sibling toolkit and
+   restarts the systemd service `wearable-a11y` (app in
+   `~/a11y-toolkit/wearable-extension`; nginx forwards the URL to it). Deploying
+   never touches the server's `.env` or `data/`. The server `.env` differs from
+   `.env.example` in:
 
    | Key | Value |
    |---|---|
-   | `PACKAGE_NAME`, `MENTRAOS_API_KEY` | from the console app |
+   | `BRIDGE_TOKEN` | the shared secret the phone app must present |
    | `RTMP_HOST` | the server's public IP — the glasses publish RTMP straight to it |
    | `PORT`, `RTMP_PORT`, `DEMO_PORT` | 3700, 1936 (open in the GCP firewall), 3701 |
 
-3. **Glasses on Wi-Fi.** Any Wi-Fi with internet. The HUD says
-   *Connect glasses to WiFi* otherwise.
-4. **Run.** The service is always up; Gemini stays off until you press Start.
-   Open the app on the glasses and press **Start** on the phone panel. That one
-   switch turns on Gemini and the camera. The HUD shows
-   *Ready — Appliance Guide listening*.
+3. **Phone app.** Needs Xcode (iPhone) or Android Studio (Android) and the
+   phone on a USB cable.
 
    ```bash
-   gcloud compute ssh attune-server --zone=us-east1-b     # then, on the server:
-   cd ~/a11y-toolkit/wearable-extension && bun run reset:take   # between Toolkit takes
-   journalctl -u wearable-a11y -f                         # logs, every camera status change
-   sudo systemctl stop wearable-a11y                      # off for good (■ Stop only restarts it)
+   cd phone
+   bun install
+   cp .env.example .env      # set EXPO_PUBLIC_BRIDGE_TOKEN to the server's BRIDGE_TOKEN
+   bun run ios:release       # or: bun run android:release
    ```
 
-   To see what the glasses see, tunnel the demo page (it isn't public):
-   `gcloud compute ssh attune-server --zone=us-east1-b -- -L 3701:localhost:3701`,
-   then open http://localhost:3701.
+   The `:release` builds run on their own; `bun run ios` / `bun run android`
+   make a development build that needs this laptop running `bun run start`.
+   The URL and token are baked in at build time — rebuild after changing them.
+   On an iPhone, the first build asks you to pick a signing team in Xcode
+   (`phone/ios/*.xcworkspace` → Signing & Capabilities).
 
-To run it from a laptop instead, set `RTMP_HOST` to the laptop's Wi-Fi address,
-put glasses and laptop on the same network (a phone hotspot is the safe
-choice), `bun run start`, and point the console URL at a tunnel to port 3000.
+### Each session
 
-This path has not been run on hardware from this repo yet — the first run is
-a bring-up session (`docs/CHECKING.md` §6). The stream, the network, and
-recognizing *"done"* in a real room are the usual things to adjust.
+1. Open **Wearable Task Guide** on the phone. *Guide server* should say
+   **Connected**.
+2. **Scan for glasses** → **Connect**. The app remembers them and reconnects
+   next time. On an iPhone, also select the glasses in Settings › Bluetooth so
+   the voice comes out of them; Android asks to pair on its own.
+3. If *Wi-Fi* says not connected, enter a network there — the camera streams
+   over Wi-Fi (any network with internet; a phone hotspot works).
+4. Press **▶ Start**. That one switch turns on Gemini, the camera and the
+   microphone. When it says *Ready — Wearable Task Guide listening*, speak.
+   **Baseline / Toolkit**, **✓ Done** and **↻ Repeat** are on the same screen,
+   and on https://a11y.attunemitserver.dev/webview for a second person.
+
+```bash
+gcloud compute ssh attune-server --zone=us-east1-b     # then, on the server:
+journalctl -u wearable-a11y -f                         # logs: phone, camera, every status change
+sudo systemctl stop wearable-a11y                      # off for good (■ Stop only restarts it)
+```
+
+To see what the glasses see, tunnel the demo page (it isn't public):
+`gcloud compute ssh attune-server --zone=us-east1-b -- -L 3701:localhost:3701`,
+then open http://localhost:3701.
+
+The guide does not listen while it is speaking (so it never hears itself):
+wait for a line to finish before saying *"done"*, or press the button.
+
+The server and the phone link are tested end to end with a stand-in phone; the
+app compiles. It has **not been run on real glasses yet** — the first run is a
+bring-up session (`docs/CHECKING.md` §6). Bluetooth audio routing, the camera
+stream and hearing *"done"* in a real room are the usual things to adjust.
 
 ## 3. Stop it — every time
 
@@ -128,13 +156,52 @@ persona plus a **task brief** — appliance facts for the washing machine and
 the bill (`src/tasks/*.json`), model-written for any other task
 (`src/skills/task-brief.ts`). The toolkit contributes exactly two things:
 
-- **input** — `src/toolkit/prompt-block.ts` adds the consented profile's
-  directives to the prompt (the person's free text never goes in);
-- **output** — `src/audio/render.ts` shapes delivery: speaking rate, one step
-  at a time, pauses, captions.
+- **input** — the profile adds directives to the prompt (the person's free
+  text never goes in);
+- **output** — the profile shapes delivery: speaking rate, one step at a
+  time, pauses, captions.
 
-Baseline is the same app with those two switched off. Consent, the profile
-store, and profile sharing are the toolkit's; the app never bypasses them.
+Baseline is the same app with those two switched off.
+
+## The toolkit and this app — who does what
+
+The **toolkit** knows the person. The **wearable extension** knows the glasses
+and the task. The toolkit never sees or speaks; the app never saves its own
+copy of the profile.
+
+The toolkit works in three layers, and the wearable follows the same three:
+
+| Layer | What it does | Who provides it here |
+|---|---|---|
+| **Profile** | What the person needs: speech rate, plain language, captions… | Toolkit |
+| **Surface** | Turns those needs into settings for one medium. It decides; it does nothing. | Toolkit's XR surface, plus a small audio add-on in this repo (`xr-audio.ts`) — the toolkit's XR surface is built for headsets you look through, and has no pacing, pauses or pitch |
+| **Adapters** | Each carries out one kind of setting | This repo: prompt directives (plain words, one step at a time), paced delivery (short chunks, pauses), voice (rate, pitch). The toolkit's own adapters all change web pages, and glasses have no page. |
+
+Around those, the app adds what is only its own: the glasses (camera,
+microphone, voice) and the guide — Gemini writes the steps for the task.
+
+The add-on surface and the adapters live in one folder,
+`src/toolkit-candidates/`, which imports the toolkit but never the rest of the
+app. They are written here first and meant to move into the toolkit, so other
+wearable apps can use them; that folder's README says what would go, and in
+what order.
+
+### How they talk
+
+The toolkit runs inside the app as a library — no server, no network. The app
+talks to it at two moments:
+
+1. **Start.** The app opens the toolkit on its data folder (`./data`), where
+   the profile lives (`src/toolkit/host.ts`).
+2. **Read.** When Toolkit mode is switched on, the app asks the toolkit for
+   the profile, and the surface turns it into settings
+   (`src/toolkit-candidates/xr-audio.ts`, which calls the toolkit's XR
+   surface). The adapters carry those settings out in two places: the prompt
+   and the delivery.
+
+Baseline skips step 2 and speaks with default delivery. The toolkit is used as
+it is — never modified from here. (Setting up `./data` is a separate script,
+`scripts/import-profile.mjs`.)
 
 ## Toolkit pin
 

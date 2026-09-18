@@ -1,7 +1,7 @@
 {
   "name": "wearable-extension",
   "version": "0.1.0",
-  "description": "Appliance Guide — audio-first smartglasses demo app over the AI for Accessibility Toolkit (consumed as-is via a local file: link). One app, one model, two toolkit injection points: the profile prompt block (input) and the audio delivery render (output).",
+  "description": "Wearable Task Guide — audio-first smartglasses demo app over the AI for Accessibility Toolkit (consumed as-is via a local file: link). One app, one model, two toolkit injection points: the profile prompt block (input) and the audio delivery render (output).",
   "type": "module",
   "scripts": {
     "demo": "bun src/scripts/drive-core.ts",
@@ -10,18 +10,20 @@
     "deploy": "bash scripts/deploy.sh",
     "dev": "bun --hot src/index.ts",
     "import:profile": "bun scripts/import-profile.mjs",
-    "reset:take": "bun scripts/reset-take.mjs",
     "test": "bun test",
     "check": "bun scripts/check.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai4a11y/toolkit": "file:../AI-for-Accessibility-Toolkit/toolkit",
-    "@mentra/sdk": "^2.1.29",
-    "node-media-server": "^2.7.1"
+    "express": "^4.21.2",
+    "node-media-server": "^2.7.1",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^22.13.14",
+    "@types/ws": "^8.5.13",
     "bun-types": "^1.3.10",
     "typescript": "^5.0.0"
   }
