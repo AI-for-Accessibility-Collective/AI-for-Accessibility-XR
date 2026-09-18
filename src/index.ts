@@ -95,6 +95,26 @@ async function buildLive(link: PhoneLink): Promise<Live> {
   let sessionActive = false;
   let speaking = 0;
   let thinking = 0;
+  // The phone plays a "working on it" sound whenever the phase is 'thinking'.
+  // Between the chunks of one paced utterance (the 900 ms pause, the next
+  // clip's encoding) nothing is being thought, so the phase stays 'speaking'
+  // for a short grace after each chunk — a blip of that sound mid-step reads
+  // as the guide losing its place.
+  let speakingUntil = 0;
+  let speakingGrace: ReturnType<typeof setTimeout> | null = null;
+  const holdSpeaking = (ms: number): void => {
+    speakingUntil = Date.now() + ms;
+    if (speakingGrace) clearTimeout(speakingGrace);
+    speakingGrace = setTimeout(() => {
+      speakingGrace = null;
+      pushState();
+    }, ms + 20);
+  };
+  const dropSpeaking = (): void => {
+    speakingUntil = 0;
+    if (speakingGrace) clearTimeout(speakingGrace);
+    speakingGrace = null;
+  };
   let heard = '';
   let lastLine = '';
   let status = 'Ready — press Start to begin';
@@ -106,7 +126,7 @@ async function buildLive(link: PhoneLink): Promise<Live> {
     const state: PanelState = {
       active: sessionActive,
       mode: guideSession.state().mode,
-      phase: !sessionActive ? 'idle' : speaking > 0 ? 'speaking' : thinking > 0 ? 'thinking' : 'listening',
+      phase: !sessionActive ? 'idle' : speaking > 0 || Date.now() < speakingUntil ? 'speaking' : thinking > 0 ? 'thinking' : 'listening',
       heard,
       lastLine,
       status,
@@ -218,6 +238,10 @@ async function buildLive(link: PhoneLink): Promise<Live> {
         console.error('[wearable] speak failed:', e instanceof Error ? e.message : e);
       } finally {
         speaking--;
+        // More chunks of this line to come: bridge the pause and the next
+        // clip's encoding without the phase flickering to 'thinking'.
+        if (meta.index < meta.count - 1) holdSpeaking(meta.render.speech.pauseAfterUtteranceMs + 2500);
+        else dropSpeaking();
         segmenter.reset();
         pushState();
       }
@@ -394,6 +418,7 @@ async function buildLive(link: PhoneLink): Promise<Live> {
       void startCamera();
     } else {
       abortInFlightGemini('paused');
+      dropSpeaking();
       link.stopAudio();
       stopCamera();
       setStatus('Stopped — camera + AI off');
