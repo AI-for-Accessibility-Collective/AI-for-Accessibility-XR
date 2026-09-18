@@ -80,8 +80,11 @@ export function createSpeaker(sink: SpeakerSink, initial?: XRAudioSettings, hook
   // Serialize utterances so two say() calls never interleave chunks.
   let chain: Promise<unknown> = Promise.resolve();
 
-  function deliver(text: string, stepId: string | null, rateDelta: number, slower: boolean): Promise<void> {
-    const gen = generation;
+  // `gen` is the generation at ENQUEUE time: a stop() cancels everything
+  // queued behind the line being spoken, not just that line — otherwise the
+  // next step would start the moment the stopped one ended.
+  function deliver(text: string, stepId: string | null, rateDelta: number, slower: boolean, gen: number): Promise<void> {
+    if (gen !== generation) return Promise.resolve();
     const speakOptions = toSpeakOptions(render, { rateDelta, ...hooks.mapOpts });
     sink.prepare?.(chunkText(text, render.delivery.maxWordsPerUtterance), { speakOptions, slower, render, stepId });
     return deliverPaced(
@@ -98,7 +101,8 @@ export function createSpeaker(sink: SpeakerSink, initial?: XRAudioSettings, hook
       if (!clean) return Promise.resolve();
       const stepId = opts.stepId ?? null;
       if (opts.remember !== false) last = { text: clean, stepId };
-      const run = () => deliver(clean, stepId, 0, false);
+      const gen = generation;
+      const run = () => deliver(clean, stepId, 0, false, gen);
       const p = chain.then(run, run);
       chain = p.catch(() => {});
       return p;
@@ -114,7 +118,8 @@ export function createSpeaker(sink: SpeakerSink, initial?: XRAudioSettings, hook
       const count = (repeatCounts.get(key) ?? 0) + 1;
       repeatCounts.set(key, count);
       const slower = count >= 2;
-      const run = () => deliver(text, stepId, slower ? -0.1 : 0, slower);
+      const gen = generation;
+      const run = () => deliver(text, stepId, slower ? -0.1 : 0, slower, gen);
       const p = chain.then(run, run).then(() => true);
       chain = p.catch(() => {});
       return p;

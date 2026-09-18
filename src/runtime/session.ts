@@ -162,7 +162,7 @@ export function createSession(deps: SessionDeps): Session {
       engine: { turn: (t) => guideEngine!.turn(t, deps.frames.recent()) },
       verify: visionVerify,
       // A step that finishes generating after "stop" or a mode switch is dropped.
-      say: (t, o) => (gen === modeGen && guide === created ? deps.speaker.say(t, o) : Promise.resolve()),
+      say: (t, o) => (gen === modeGen && guide === created && !paused ? deps.speaker.say(t, o) : Promise.resolve()),
     });
     guide = created;
     status(`Task: ${task.goal} · ${render.delivery.mode === 'stepwise' ? 'one step at a time' : 'full walkthrough'}`);
@@ -226,7 +226,7 @@ export function createSession(deps: SessionDeps): Session {
   async function freeTurn(text: string): Promise<void> {
     const gen = modeGen;
     const reply = await ensureChat().turn(text, deps.frames.recent());
-    if (reply && gen === modeGen) await deps.speaker.say(reply, { stepId: `chat-${++chatTurns}` });
+    if (reply && gen === modeGen && !paused) await deps.speaker.say(reply, { stepId: `chat-${++chatTurns}` });
   }
 
   function setMode(next: GuideMode): Promise<void> {

@@ -146,6 +146,33 @@ describe('stop', () => {
     await speaker.say(LONG, { stepId: 'step-1' });
     expect(spoken).toHaveLength(1);
   });
+
+  test('also cancels every line queued behind the one being spoken', async () => {
+    const spoken: string[] = [];
+    let stopper: (() => void) | null = null;
+    const speaker = createSpeaker(
+      {
+        speak: async (text) => {
+          spoken.push(text);
+          stopper?.();
+          stopper = null;
+        },
+      },
+      margaretRender(),
+      { sleep: async () => {} },
+    );
+    stopper = () => speaker.stop();
+    const first = speaker.say(LONG, { stepId: 'step-1' });
+    const second = speaker.say('Now press the start button.', { stepId: 'step-2' });
+    const third = speaker.repeat();
+    await Promise.all([first, second, third]);
+    // One chunk of step 1 went out; step 2 and the repeat never did.
+    expect(spoken).toHaveLength(1);
+    // A line said AFTER the stop speaks again.
+    await speaker.say('Starting now.', { stepId: 'canned' });
+    expect(spoken[1]).toBe('Starting now.');
+    expect(spoken).toHaveLength(2);
+  });
 });
 
 describe('setRender — live A/B toggle', () => {

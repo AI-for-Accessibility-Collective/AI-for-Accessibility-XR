@@ -196,6 +196,7 @@ async function buildLive(link: PhoneLink): Promise<Live> {
           deliveryMode: meta.render.delivery.mode,
         },
       );
+      if (gone || !sessionActive) return;
       lastLine = text;
       pushState();
       const wav = await Promise.race([
@@ -206,11 +207,13 @@ async function buildLive(link: PhoneLink): Promise<Live> {
       const out = wav ? { wav } : null;
       if (gone || !sessionActive) return;
       runs.attachAudio(line, out?.wav);
+      const clip = out ? await toAac(out.wav) : null;
+      if (gone || !sessionActive) return; // Stop pressed while encoding
       speaking++;
       segmenter.reset();
       pushState();
       try {
-        await link.speak(text, out ? await toAac(out.wav) : null);
+        await link.speak(text, clip);
       } catch (e) {
         console.error('[wearable] speak failed:', e instanceof Error ? e.message : e);
       } finally {
