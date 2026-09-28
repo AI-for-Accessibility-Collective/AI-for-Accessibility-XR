@@ -36,6 +36,18 @@
 export interface GeminiPart {
   text?: string;
   inlineData?: { mimeType: string; data: string };
+  // Tool use: the model asks for a call; the caller answers with its result.
+  functionCall?: { name: string; args?: Record<string, unknown> };
+  functionResponse?: { name: string; response: Record<string, unknown> };
+}
+
+export interface ToolCall {
+  name: string;
+  args: Record<string, unknown>;
+  // The model's own part, exactly as it sent it. Gemini 3 signs each call
+  // (thoughtSignature) and rejects the follow-up unless that part comes back
+  // untouched — so the reply is built from this, never rebuilt from name/args.
+  part: GeminiPart;
 }
 
 export interface GeminiContent {
@@ -55,6 +67,8 @@ export interface GenerateOpts {
   // When set, the answer is streamed and this is called with the text so far
   // as it grows. The resolved result is the same either way.
   onText?: (soFar: string) => void;
+  // Function declarations the model may call instead of (or before) answering.
+  tools?: readonly unknown[];
 }
 
 export type ThinkingRung = 'budget0' | 'level-low' | 'model-default';
@@ -66,6 +80,8 @@ export interface GenerateResult {
   finishReason: string;
   thoughtTokens: number;
   thinking: ThinkingRung;
+  // Calls the model asked for, when tools were offered. Absent = none.
+  toolCalls?: ToolCall[];
 }
 
 // ---- stop switch + runaway guard ------------------------------------------------
@@ -186,11 +202,13 @@ async function readStream(res: Response, onText: (soFar: string) => void): Promi
   let buffered = '';
   let text = '';
   let last: any = null;
+  const calls: any[] = [];
   const take = (line: string): void => {
     if (!line.startsWith('data:')) return;
     const chunk = JSON.parse(line.slice(5).trim());
     last = chunk;
     const parts: any[] = chunk?.candidates?.[0]?.content?.parts ?? [];
+    for (const p of parts) if (p?.functionCall) calls.push(p); // whole part: its signature must survive
     const piece = parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('');
     if (piece) {
       text += piece;
@@ -208,7 +226,7 @@ async function readStream(res: Response, onText: (soFar: string) => void): Promi
     }
   }
   if (buffered.trim()) take(buffered.trim());
-  return { ...last, candidates: [{ ...last?.candidates?.[0], content: { parts: [{ text }] } }] };
+  return { ...last, candidates: [{ ...last?.candidates?.[0], content: { parts: [{ text }, ...calls] } }] };
 }
 
 export async function generateContent(opts: GenerateOpts, fetchImpl: typeof fetch = fetch): Promise<GenerateResult> {
@@ -226,6 +244,7 @@ export async function generateContent(opts: GenerateOpts, fetchImpl: typeof fetc
     };
     if (config) generationConfig.thinkingConfig = config;
     const body: Record<string, unknown> = { contents: opts.contents, generationConfig };
+    if (opts.tools?.length) body.tools = [{ functionDeclarations: opts.tools }];
     if (opts.systemInstruction) body.systemInstruction = { parts: [{ text: opts.systemInstruction }] };
     const timeoutMs = opts.timeoutMs ?? (config ? TIMEOUT_MS : MODEL_DEFAULT_TIMEOUT_MS);
 
@@ -257,7 +276,11 @@ export async function generateContent(opts: GenerateOpts, fetchImpl: typeof fetc
         const candidate = data?.candidates?.[0];
         const parts: any[] = candidate?.content?.parts ?? [];
         const blockReason = data?.promptFeedback?.blockReason;
+        const toolCalls: ToolCall[] = parts
+          .filter((p) => p?.functionCall && typeof p.functionCall.name === 'string')
+          .map((p) => ({ name: p.functionCall.name, args: (p.functionCall.args ?? {}) as Record<string, unknown>, part: p as GeminiPart }));
         return {
+          ...(toolCalls.length ? { toolCalls } : {}),
           text: parts.map((p) => (typeof p?.text === 'string' ? p.text : '')).join('').trim(),
           finishReason: blockReason ? `BLOCKED_${blockReason}` : String(candidate?.finishReason ?? 'UNKNOWN'),
           thoughtTokens: Number(data?.usageMetadata?.thoughtsTokenCount ?? 0),

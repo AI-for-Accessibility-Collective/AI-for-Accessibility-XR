@@ -10,9 +10,15 @@ export function promptLines(r: XRAudioSettings): string[] {
     // Orientation: the shape of the task before step one, said the way a
     // person would — never a bare step count, which came out as "This task
     // will take just one step."
-    "At the start of a task with three or more steps you may open with one natural sentence about what's involved " +
-      "('Three quick things and it's running.'). Never announce a count of one or two steps, and never say 'this will take N steps'.",
+    // (No example sentence: one was given here once and came back verbatim —
+    // "Three quick things and it's running" — for charging a pair of earbuds.)
+    'At the start of a task with three or more steps you may open with one short sentence, in your own words and about this task, saying roughly what is involved. ' +
+      "Never announce a count of one or two steps, and never say 'this will take N steps'.",
   ];
+}
+
+export function tags(r: XRAudioSettings): string[] {
+  return r.delivery.gistFirst ? ['Gist first'] : [];
 }
 
 export function effect(r: XRAudioSettings): string[] {

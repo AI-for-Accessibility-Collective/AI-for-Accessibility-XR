@@ -21,8 +21,16 @@ describe('profilePromptBlock(margaret)', () => {
   test('one-step directive present (stepwise)', () => {
     expect(block).toContain('exactly ONE next action');
     // The check-in is natural speech; the wearer is never told to say a keyword.
-    expect(block).toContain('never an instruction to say a particular word');
+    expect(block).toContain('never instruct them to say a particular word');
     expect(block).not.toMatch(/say 'done'/);
+  });
+  test('continuity directive present (stepwise): help from where they are, never re-read the step', () => {
+    expect(block).toContain('help from where they are');
+    expect(block).toContain('Do not read the step out again word for word');
+  });
+  test('no quotable example phrases for the model to parrot', () => {
+    expect(block).not.toContain("Tell me when that's in");
+    expect(block).not.toContain('Three quick things');
   });
   test('short-sentence directive present (12 words: clarity clear)', () => {
     expect(block).toContain('under ~12 words, one clause each');
@@ -68,7 +76,10 @@ describe('profilePromptBlock(margaret)', () => {
     expect(block).toMatch(/gist first/);
   });
   test('confirm-then-next directive present (stepwise)', () => {
-    expect(block).toContain('When the wearer says they have done it, in whatever words, acknowledge in a few words');
+    expect(block).toContain('begin your reply with a few plain words naming what they just did');
+    // Spoken aloud exactly as written: an instruction phrased as a stage
+    // direction came back as the word "Acknowledge:" in the guide's voice.
+    expect(block).toContain('never write labels, headings or stage directions');
   });
   test('orientation directive present (gistFirst): natural, never a bare step count', () => {
     expect(block).toContain('three or more steps');

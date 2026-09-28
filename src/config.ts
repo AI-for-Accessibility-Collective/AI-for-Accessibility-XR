@@ -89,9 +89,16 @@ export const config = {
   // comfortably over ordinary Wi-Fi.
   streamWidth: int('STREAM_WIDTH', 1280),
   streamHeight: int('STREAM_HEIGHT', 720),
-  streamBitrate: int('STREAM_BITRATE', 3_000_000),
+  // 3 frames a second needs little: 3 Mbit/s stalled the glasses' stream about
+  // fifteen seconds in, every take. 1.2 is ample for 720p stills at this rate.
+  streamBitrate: int('STREAM_BITRATE', 1_200_000),
   captureFps: int('CAPTURE_FPS', 3),
   frameRingSize: int('FRAME_RING_SIZE', 3),
+  // A turn is answered from what the camera saw when the wearer began to
+  // speak. Video reaches this server later than their voice does (RTMP
+  // encode + buffering vs. the mic's Bluetooth hop), so the frame for "the
+  // moment they started" arrives about this much after their first word.
+  frameLagMs: int('FRAME_LAG_MS', 1000),
 
   // Demo browser view — the load-bearing rehearsal rig (docs/PLAN.md rule 3).
   enableDemo: bool('ENABLE_DEMO', true),

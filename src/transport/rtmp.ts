@@ -21,10 +21,41 @@ export function startRtmpServer(rtmpPort: number): void {
     http: { port: rtmpPort + 7000, allow_origin: '*' },
   };
   rtmpServer = new NodeMediaServer(nmsConfig);
-  rtmpServer.on('prePublish', (id: string, p: string) => console.log(`  [RTMP] publishing: ${p} (${id})`));
-  rtmpServer.on('donePublish', (id: string, p: string) => console.log(`  [RTMP] stopped: ${p} (${id})`));
+  rtmpServer.on('prePublish', (id: string, p: string) => {
+    console.log(`  [RTMP] publishing: ${p} (${id})`);
+    publishers.set(id, p);
+  });
+  rtmpServer.on('donePublish', (id: string, p: string) => {
+    console.log(`  [RTMP] stopped: ${p} (${id})`);
+    publishers.delete(id);
+  });
   rtmpServer.run();
   console.log(`  [RTMP] server started on port ${rtmpPort}`);
+}
+
+// Who is publishing what. The glasses do not always close their stream when
+// told to stop: the connection lingers, open and silent, still owning its
+// path. That is why every camera start gets a path of its own (streamKey) —
+// a leftover can never stand in the way of the next stream — and why the
+// leftovers are cleared out here rather than waited on.
+const publishers = new Map<string, string>();
+
+export function newStreamKey(): string {
+  return `s${Date.now().toString(36)}`;
+}
+
+export function dropPublishersExcept(streamKey: string): void {
+  if (!rtmpServer) return;
+  for (const [id, path] of publishers) {
+    if (path.endsWith(`/${streamKey}`)) continue;
+    try {
+      rtmpServer.getSession(id)?.stop();
+      console.log(`  [RTMP] dropped leftover publisher: ${path} (${id})`);
+    } catch {
+      /* already gone */
+    }
+    publishers.delete(id);
+  }
 }
 
 export function stopRtmpServer(): void {
@@ -39,12 +70,12 @@ export function stopRtmpServer(): void {
 }
 
 // URL the glasses publish to (their LAN view of this machine).
-export function getPublishUrl(rtmpHost: string, rtmpPort: number): string {
+export function getPublishUrl(rtmpHost: string, rtmpPort: number, streamKey = 'stream'): string {
   if (!rtmpHost) throw new Error('RTMP_HOST must be set (this machine\'s LAN IP, reachable by the glasses)');
-  return `rtmp://${rtmpHost}:${rtmpPort}/live/stream`;
+  return `rtmp://${rtmpHost}:${rtmpPort}/live/${streamKey}`;
 }
 
 // URL ffmpeg reads from locally (always loopback).
-export function getPlayUrl(rtmpPort: number): string {
-  return `rtmp://127.0.0.1:${rtmpPort}/live/stream`;
+export function getPlayUrl(rtmpPort: number, streamKey = 'stream'): string {
+  return `rtmp://127.0.0.1:${rtmpPort}/live/${streamKey}`;
 }

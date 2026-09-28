@@ -12,6 +12,9 @@ import { fileKV } from '@ai4a11y/toolkit/platforms/node/kv.js';
 // Where a need written from the profile editor says it came from — shown as
 // provenance next to the onboarding's own sources.
 export const EDITOR_SOURCE = 'profile-editor';
+// …and where one chosen by ear in the spoken setup says it came from
+// (runtime/onboarding.ts).
+export const ONBOARDING_SOURCE = 'onboarding-conversation';
 
 export interface GuideToolkit {
   librarian: Librarian;
@@ -64,17 +67,19 @@ function serialized<T>(tk: GuideToolkit, work: () => Promise<T>): Promise<T> {
 // INFERRED changes, and this is the person (or the presenter) saying so
 // (toolkit API.md, "profile/ability"). The rest of the array is kept as is,
 // so provenance on untouched needs survives; the written need is recorded as
-// a preference from the editor. Values are the caller's business to validate
-// (needs-catalog.ts) — this only writes.
+// a preference from the editor — or from `source`, when another part of the
+// app is where the person said so. Values are the caller's business to
+// validate (needs-catalog.ts) — this only writes.
 export async function writeNeed(
   tk: GuideToolkit,
   dimension: string,
   value: boolean | string | number | null,
+  source: string = EDITOR_SOURCE,
 ): Promise<AbilityModel | null> {
   return serialized(tk, async () => {
     const full = await tk.librarian.getAbilityModel();
     const kept: Need[] = (Array.isArray(full.needs) ? full.needs : []).filter((n) => n.dimension !== dimension);
-    const needs: Need[] = value == null ? kept : [...kept, { dimension, value, strength: 'preference', source: EDITOR_SOURCE }];
+    const needs: Need[] = value == null ? kept : [...kept, { dimension, value, strength: 'preference', source }];
     await tk.librarian.setProfileField('fields.needs', needs);
     return readModel(tk);
   });

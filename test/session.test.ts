@@ -55,6 +55,7 @@ async function rig(opts: RigOpts = {}) {
   const events: SessionEvent[] = [];
   const turns: string[] = [];
   const instructions: string[] = []; // system instruction of each engine made
+  const framesUsed: Array<{ what: string; jpegs: string[] }> = []; // what the debug view is told
 
   const tk = await bootToolkit({ dataDir: dir, actingUser: 'margaret' });
   await tk.librarian.importProfileBlob(fixture as never);
@@ -85,8 +86,9 @@ async function rig(opts: RigOpts = {}) {
     tasks: opts.tasks ?? [washingMachine as Task],
     vision: (opts.vision ?? null) as never,
     initialMode: 'baseline',
+    onFramesUsed: (what, used) => void framesUsed.push({ what, jpegs: used.map((f) => String(f.jpeg)) }),
   });
-  return { session, tk, spoken, events, turns, instructions, frames };
+  return { session, tk, spoken, events, turns, instructions, frames, framesUsed };
 }
 
 const taskStatus = (r: Awaited<ReturnType<typeof rig>>) =>
@@ -101,6 +103,16 @@ describe('choosing Toolkit mode', () => {
     expect(st.needs.map((n) => n.dimension).sort()).toEqual(['captions', 'clarity', 'pacing', 'readAloudRate', 'simplify']);
     expect(r.spoken).toEqual([]);
     expect(r.events.filter((e) => e.type !== 'status')).toEqual([]);
+  });
+
+  test('the panels are told as it happens: the read starting, then the profile in use — and baseline as none', async () => {
+    const r = await rig();
+    await r.session.setMode('toolkit');
+    expect(r.events.map((e) => e.toolkit).filter(Boolean)).toEqual(['reading', 'loaded']);
+    await r.session.refreshProfile();
+    expect(r.events.at(-1)?.toolkit).toBe('updated');
+    await r.session.setMode('baseline');
+    expect(r.events.at(-1)?.toolkit).toBe('none');
   });
 
   test('works while paused (the mode chosen at boot, before Start)', async () => {
@@ -280,6 +292,32 @@ describe('routing', () => {
     expect(r.session.state().task).toBeNull();
     expect(r.events.some((e) => e.type === 'status' && e.text.startsWith('Task:'))).toBe(false);
     expect(r.instructions.at(-1)).not.toMatch(/^TASK:|\nTASK:/);
+  });
+});
+
+describe('the frames the debug view is shown', () => {
+  test('a conversation turn reports the whole ring, oldest first — the frames the model gets', async () => {
+    const r = await rig({ replies: ['A kettle.'] });
+    for (const f of ['one', 'two', 'three', 'four']) r.frames.push(Buffer.from(`frame-${f}`));
+    await r.session.onUtterance('what is in front of me');
+    expect(r.framesUsed).toEqual([{ what: 'Answering', jpegs: ['frame-two', 'frame-three', 'frame-four'] }]);
+  });
+
+  test('a read reports the fresh frames it waited for, not the ring', async () => {
+    const r = await rig({ vision: { generate: async () => '{"text": "AMOUNT DUE", "sizePct": 8, "kind": "bill"}' } });
+    r.frames.push(Buffer.from('stale'));
+    setTimeout(() => {
+      r.frames.push(Buffer.from('fresh-one'));
+      r.frames.push(Buffer.from('fresh-two'));
+    }, 5);
+    await r.session.onUtterance('what does this say?');
+    expect(r.framesUsed).toEqual([{ what: 'Reading text', jpegs: ['fresh-one', 'fresh-two'] }]);
+  });
+
+  test('no camera: an empty list is still reported, so the view can say the model saw nothing', async () => {
+    const r = await rig({ replies: ['I cannot see anything.'] });
+    await r.session.onUtterance('what is in front of me');
+    expect(r.framesUsed).toEqual([{ what: 'Answering', jpegs: [] }]);
   });
 });
 

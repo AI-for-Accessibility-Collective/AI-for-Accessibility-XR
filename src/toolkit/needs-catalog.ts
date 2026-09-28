@@ -28,9 +28,11 @@ export interface NeedSpec {
   default: boolean | string | number;
 }
 
-// Order is display order: what the film is about first (pacing, rate, plain
-// words, captions), then the two the toolkit stores but no surface of its own
-// reads yet.
+// Order is display order. Only the three the wearer is asked about — one step
+// at a time, speaking pace, text on the phone. The surface reads more
+// dimensions than these (clarity, simplify, spokenDetail, voicePitch) and a
+// profile may carry them, but they are not offered as settings: three is what
+// a person can hold in mind, and the film is about these three.
 export const NEED_SPECS: readonly NeedSpec[] = [
   {
     key: 'pacing',
@@ -42,37 +44,6 @@ export const NEED_SPECS: readonly NeedSpec[] = [
       { value: 'stepwise', label: 'One step at a time' },
     ],
     default: 'continuous',
-  },
-  {
-    key: 'clarity',
-    label: 'Clarity',
-    help: 'Clear: the action first, one new thing per sentence, a question instead of "if". Extra clear: also says which step you are on.',
-    kind: 'choice',
-    options: [
-      { value: 'standard', label: 'Standard' },
-      { value: 'clear', label: 'Clear' },
-      { value: 'clearest', label: 'Extra clear' },
-    ],
-    default: 'clear',
-  },
-  {
-    key: 'simplify',
-    label: 'Plain words',
-    help: 'Everyday words — "soap", "big dial". Not manual terms, never jargon, never technical terms.',
-    kind: 'toggle',
-    default: false,
-  },
-  {
-    key: 'spokenDetail',
-    label: 'Detail',
-    help: 'Gist first: the one-sentence point, then details only if you ask.',
-    kind: 'choice',
-    options: [
-      { value: 'gist', label: 'Gist first' },
-      { value: 'standard', label: 'Standard' },
-      { value: 'full', label: 'Full detail' },
-    ],
-    default: 'standard',
   },
   {
     key: 'readAloudRate',
@@ -91,17 +62,6 @@ export const NEED_SPECS: readonly NeedSpec[] = [
     help: 'The guide’s words also appear on the display.',
     kind: 'toggle',
     default: false,
-  },
-  {
-    key: 'voicePitch',
-    label: 'Voice pitch',
-    help: 'A lower-pitched voice. (Film mode keeps one voice, so on film this changes nothing.)',
-    kind: 'choice',
-    options: [
-      { value: 'standard', label: 'Standard' },
-      { value: 'low', label: 'Low' },
-    ],
-    default: 'standard',
   },
 ];
 

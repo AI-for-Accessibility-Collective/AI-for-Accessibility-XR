@@ -54,7 +54,12 @@ export async function synthesizeSpeech(opts: {
   stylePrefix?: string;
 }): Promise<{ wav: Buffer; mime: string } | null> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${opts.model}:generateContent`;
-  const text = (opts.stylePrefix || '') + opts.text;
+  // Gemini TTS is steered by its prompt. A line sent bare is sometimes read as
+  // a request and ANSWERED rather than spoken — no audio comes back, and the
+  // phone falls back to its own voice ("Let's set me up so…" failed this way;
+  // baseline mode sends every line bare). A lead-in that asks for nothing but
+  // reading makes every line a transcript, in the engine's default delivery.
+  const text = (opts.stylePrefix || 'Say the following: ') + opts.text;
   let request: ReturnType<typeof guardedRequest>;
   try {
     request = guardedRequest(30_000);
@@ -120,4 +125,35 @@ export async function toAac(wav: Buffer): Promise<{ audio: Buffer; mime: string;
     });
     ff.stdin.end(wav);
   });
+}
+
+// Gemini's clips arrive with ~0.3 s of silence before the first word and ~0.4 s
+// after the last. Between the lines of a stepwise answer that dead air stacks
+// on top of the deliberate pause. This keeps a breath at each end (so nothing
+// is clipped and lines don't butt together) and drops the rest. The speech
+// itself is untouched.
+export function trimSilence(wav: Buffer, keepLeadMs = 60, keepTailMs = 140): Buffer {
+  if (wav.length <= 44) return wav;
+  const sampleRate = wav.readUInt32LE(24);
+  const pcm = wav.subarray(44);
+  const samples = Math.floor(pcm.length / 2);
+  const win = Math.max(1, Math.floor(sampleRate * 0.01));
+  const loudAt = (w: number): boolean => {
+    let sum = 0;
+    const start = w * win;
+    for (let j = 0; j < win && start + j < samples; j++) {
+      const v = pcm.readInt16LE((start + j) * 2);
+      sum += v * v;
+    }
+    return Math.sqrt(sum / win) > 300;
+  };
+  const windows = Math.floor(samples / win);
+  let first = 0;
+  while (first < windows && !loudAt(first)) first++;
+  if (first >= windows) return wav; // silence all the way through: leave it alone
+  let last = windows - 1;
+  while (last > first && !loudAt(last)) last--;
+  const from = Math.max(0, first * win - Math.floor((sampleRate * keepLeadMs) / 1000));
+  const to = Math.min(samples, (last + 1) * win + Math.floor((sampleRate * keepTailMs) / 1000));
+  return pcmToWav(Buffer.from(pcm.subarray(from * 2, to * 2)), sampleRate);
 }

@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import * as Speech from 'expo-speech';
 import BluetoothSdk from '@mentra/bluetooth-sdk';
-import type { DownMessage, GuideModeWire, PanelState, UpMessage } from '../../src/transport/phone-protocol.ts';
+import type { DownMessage, FramesUsed, GuideModeWire, PanelState, UpMessage } from '../../src/transport/phone-protocol.ts';
 
 const PHONE_WS_PATH = '/phone'; // = PHONE_WS_PATH in phone-protocol.ts (a type-only import can't carry it)
 
@@ -24,25 +24,49 @@ const RECONNECT_MS = [1000, 2000, 5000, 10_000];
 
 export type ServerStatus = 'connecting' | 'connected' | 'refused' | 'offline';
 
+export interface LagCheck {
+  ok: boolean;
+  videoMs?: number;
+  lagMs?: number;
+  samples?: number;
+  spreadMs?: number;
+  reason?: string;
+}
+
+const FLASHES = 6;
+const FLASH_MS = 600;
+
 export interface GuideLink {
+  // Measures how far the camera runs behind, by flashing the screen (the
+  // caller shows white while `flash(true)`) with the glasses pointed at it.
+  checkCameraTiming: (flash: (on: boolean) => void, progress: (text: string) => void) => Promise<LagCheck>;
   server: ServerStatus;
   serverDetail: string;
   panel: PanelState | null;
+  // Debug: the camera frames behind the turn the guide is working on (or last did).
+  framesUsed: FramesUsed | null;
   setActive: (on: boolean) => void;
   setMode: (mode: GuideModeWire) => void;
   say: (text: string) => void;
+  // The spoken setup: begin it, or end it early (what was chosen is kept).
+  onboarding: (action: 'start' | 'cancel') => void;
 }
 
 export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null }): GuideLink {
   const [server, setServer] = useState<ServerStatus>('connecting');
   const [serverDetail, setServerDetail] = useState('');
   const [panel, setPanel] = useState<PanelState | null>(null);
+  const [framesUsed, setFramesUsed] = useState<FramesUsed | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const welcomedRef = useRef(false);
   const micOnRef = useRef(false);
   const playingRef = useRef(false);
   const playerRef = useRef<AudioPlayer | null>(null);
+  // Server clock − phone clock, from the quickest of a few round trips.
+  const clockRef = useRef<{ offset: number; rtt: number } | null>(null);
+  const waitersRef = useRef<{ ready?: (m: { ready: boolean; reason?: string }) => void; done?: (m: LagCheck) => void }>({});
+  const stoppingRef = useRef<Promise<void> | null>(null);
   const cueRef = useRef<AudioPlayer | null>(null);
   const cueOnRef = useRef(false);
   const ledTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -119,18 +143,46 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
   }, []);
 
   // ── Speaking ──────────────────────────────────────────────────────────────
+  // Silence, now. Every step is guarded on its own: a player that refuses to
+  // be released must not leave the phone's own voice, or the flags, running.
+  // The line that was playing is then reported finished, so the server is
+  // never left waiting for a clip that was cut off.
+  const finishRef = useRef<(() => void) | null>(null);
   const stopAudio = useCallback((): void => {
-    playerRef.current?.remove();
+    const player = playerRef.current;
     playerRef.current = null;
-    void Speech.stop();
+    if (player) {
+      try {
+        player.pause(); // stops the sound at once; remove() alone can let the buffer play out
+      } catch {
+        /* already gone */
+      }
+      try {
+        player.remove();
+      } catch {
+        /* already gone */
+      }
+    }
+    try {
+      void Speech.stop();
+    } catch {
+      /* nothing was speaking */
+    }
     playingRef.current = false;
     void BluetoothSdk.setOwnAppAudioPlaying(false).catch(() => {});
+    const finish = finishRef.current;
+    finishRef.current = null;
+    finish?.();
   }, []);
 
-  // Resolves when the line has finished playing (or was stopped).
+  // Resolves when the line has finished playing (or was stopped), with how
+  // long the phone took to start it and how long it played — the server
+  // logs these so slow turns can be blamed on the right stage.
   const speak = useCallback(
-    (text: string, audioPath: string | null): Promise<void> =>
-      new Promise<void>((resolve) => {
+    (text: string, audioPath: string | null): Promise<{ loadMs: number; playMs: number }> =>
+      new Promise<{ loadMs: number; playMs: number }>((resolve) => {
+        const t0 = Date.now();
+        let tPlay = 0;
         stopAudio();
         setCue(false);
         playingRef.current = true;
@@ -141,28 +193,61 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
           if (finished) return;
           finished = true;
           clearTimeout(guard);
+          if (finishRef.current === finish) finishRef.current = null;
           if (playerRef.current === player) {
-            player?.remove();
+            try {
+              player?.remove();
+            } catch {
+              /* already gone */
+            }
             playerRef.current = null;
           }
           playingRef.current = false;
           void BluetoothSdk.setOwnAppAudioPlaying(false).catch(() => {});
-          resolve();
+          resolve({ loadMs: (tPlay || Date.now()) - t0, playMs: tPlay ? Date.now() - tPlay : 0 });
         };
-        // A clip that never reports its end must not block the guide forever.
-        const guard = setTimeout(finish, 80_000);
+        // A clip that never reports its end must not hold the guide — and it
+        // happens: a clip the server no longer has, a download that stalls, a
+        // player that loads and never starts. The guard is as tight as what is
+        // known: a few seconds to start, then the clip's own remaining length.
+        // (It was a flat 80 s, which is what "Speaking…" with nothing happening
+        // looked like.)
+        const START_GRACE_MS = 8000;
+        const END_GRACE_MS = 3000;
+        let guard = setTimeout(finish, START_GRACE_MS);
+        const armGuard = (ms: number): void => {
+          clearTimeout(guard);
+          guard = setTimeout(finish, ms);
+        };
+        finishRef.current = finish;
 
         let player: AudioPlayer | null = null;
         if (!audioPath) {
-          Speech.speak(text, { onDone: finish, onStopped: finish, onError: finish });
+          // The phone's own voice: about 2.5 words a second, plus some grace.
+          armGuard(START_GRACE_MS + (text.split(/\s+/).length / 2.5) * 1000);
+          Speech.speak(text, {
+            onStart: () => {
+              tPlay = Date.now();
+            },
+            onDone: finish,
+            onStopped: finish,
+            onError: finish,
+          });
           return;
         }
-        player = createAudioPlayer({ uri: SERVER_URL + audioPath }, { updateInterval: 200 });
-        playerRef.current = player;
-        player.addListener('playbackStatusUpdate', (status) => {
-          if (status.didJustFinish) finish();
-        });
-        player.play();
+        try {
+          player = createAudioPlayer({ uri: SERVER_URL + audioPath }, { updateInterval: 200 });
+          playerRef.current = player;
+          player.addListener('playbackStatusUpdate', (status) => {
+            if (status.playing && !tPlay) tPlay = Date.now();
+            if (status.didJustFinish) return finish();
+            // Playing, or loaded and about to: give it what is left of the clip.
+            if (status.playing && status.duration > 0) armGuard((status.duration - status.currentTime) * 1000 + END_GRACE_MS);
+          });
+          player.play();
+        } catch {
+          finish(); // no player at all: the line is skipped, not waited for
+        }
       }),
     [stopAudio, setCue],
   );
@@ -204,7 +289,23 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
           break;
         case 'state':
           setPanel(m.state);
-          setCue(m.state.active && m.state.phase === 'thinking' && !playingRef.current);
+          if (!m.state.active && (playingRef.current || playerRef.current)) stopAudio();
+          // The server says when: after the spoken acknowledgement, never under it.
+          setCue((m.state.cue ?? (m.state.active && m.state.phase === 'thinking')) && !playingRef.current);
+          break;
+        case 'frames-used':
+          setFramesUsed(m.used);
+          break;
+        case 'clock': {
+          const rtt = Date.now() - m.at;
+          if (!clockRef.current || rtt < clockRef.current.rtt) clockRef.current = { rtt, offset: m.now + rtt / 2 - Date.now() };
+          break;
+        }
+        case 'calibrate':
+          waitersRef.current.ready?.(m);
+          break;
+        case 'calibrated':
+          waitersRef.current.done?.(m);
           break;
         case 'mic':
           micOnRef.current = m.on;
@@ -219,18 +320,25 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
           })();
           break;
         case 'speak':
-          void speak(m.text, m.audioPath).then(() => reply(m.id, true));
+          void speak(m.text, m.audioPath).then((timing) => reply(m.id, true, JSON.stringify(timing)));
           break;
         case 'stop-audio':
           stopAudio();
           break;
         case 'camera-start':
-          BluetoothSdk.startStream({
-            type: 'start_stream',
-            streamUrl: m.url,
-            video: { fps: m.fps, width: m.width, height: m.height, bitrate: m.bitrate },
-            sound: false,
-          }).then(
+          // The glasses run one stream, and a start that lands while a stop is
+          // still being carried out is refused ("preempted"). So: stop first,
+          // wait for it, then start.
+          (stoppingRef.current ?? Promise.resolve())
+            .then(() =>
+              BluetoothSdk.startStream({
+                type: 'start_stream',
+                streamUrl: m.url,
+                video: { fps: m.fps, width: m.width, height: m.height, bitrate: m.bitrate },
+                sound: false,
+              }),
+            )
+            .then(
             () => {
               setCameraLight(true);
               reply(m.id, true);
@@ -238,10 +346,17 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
             (e: unknown) => reply(m.id, false, e instanceof Error ? e.message : String(e)),
           );
           break;
-        case 'camera-stop':
+        case 'camera-stop': {
           setCameraLight(false);
-          void BluetoothSdk.stopStream().catch(() => {});
+          const stopping = BluetoothSdk.stopStream()
+            .then(() => undefined)
+            .catch(() => undefined)
+            .finally(() => {
+              if (stoppingRef.current === stopping) stoppingRef.current = null;
+            });
+          stoppingRef.current = stopping;
           break;
+        }
       }
     };
 
@@ -272,6 +387,7 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
         void BluetoothSdk.setMicState(false).catch(() => {});
         void BluetoothSdk.stopStream().catch(() => {});
         setPanel(null);
+        setFramesUsed(null); // its pictures live on the server we just lost
         if (closed) return;
         if (ev.code === 4401) return; // wrong token — retrying won't help
         setServer('offline');
@@ -283,6 +399,13 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
 
     connect();
     ping = setInterval(() => send({ t: 'ping' }), PING_MS);
+
+    // The glasses' own account of their camera stream, for the server's log.
+    const streamStatus = BluetoothSdk.addListener('stream_status', (event) => {
+      const e = event as { status?: string; errorDetails?: string; reason?: string; attempt?: number; maxAttempts?: number };
+      const detail = e.errorDetails ?? e.reason ?? (e.attempt != null ? `attempt ${e.attempt}${e.maxAttempts ? '/' + e.maxAttempts : ''}` : undefined);
+      send({ t: 'camera-status', status: String(e.status ?? 'unknown'), detail });
+    });
 
     // Glasses mic → server, as raw binary frames.
     const mic = BluetoothSdk.addListener('mic_pcm', (event) => {
@@ -296,6 +419,7 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
       if (retry) clearTimeout(retry);
       if (ping) clearInterval(ping);
       mic.remove();
+      streamStatus.remove();
       wsRef.current?.close();
       stopAudio();
       setCue(false);
@@ -310,12 +434,74 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
     send({ t: 'glasses', connected: glasses.connected, wifi: glasses.wifi });
   }, [send, glasses.connected, glasses.wifi]);
 
+  const checkCameraTiming = useCallback(
+    async (flash: (on: boolean) => void, progress: (text: string) => void): Promise<LagCheck> => {
+      const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+      const wait = <T,>(slot: 'ready' | 'done', ms: number): Promise<T | null> =>
+        new Promise<T | null>((resolve) => {
+          const timer = setTimeout(() => resolve(null), ms);
+          (waitersRef.current as Record<string, unknown>)[slot] = (m: T) => {
+            clearTimeout(timer);
+            resolve(m);
+          };
+        });
+      try {
+        progress('Checking the clock…');
+        clockRef.current = null;
+        for (let i = 0; i < 6; i++) {
+          send({ t: 'clock', at: Date.now() });
+          await sleep(150);
+        }
+        await sleep(400);
+        const clock = clockRef.current as { offset: number; rtt: number } | null;
+        if (!clock) return { ok: false, reason: 'The guide server did not answer. Check the connection and try again.' };
+
+        const ready = wait<{ ready: boolean; reason?: string }>('ready', 5000);
+        send({ t: 'calibrate', step: 'begin' });
+        const go = await ready;
+        if (!go?.ready) return { ok: false, reason: go?.reason ?? 'The guide server did not answer.' };
+
+        progress('Hold the glasses facing this screen, about a hand away.');
+        await sleep(2500);
+        const at: number[] = [];
+        for (let i = 0; i < FLASHES; i++) {
+          progress(`Flash ${i + 1} of ${FLASHES} — keep looking at the screen`);
+          // Uneven gaps on purpose: only the true delay lines them all up.
+          await sleep(1300 + Math.random() * 1400);
+          flash(true);
+          at.push(Date.now() + clock.offset);
+          await sleep(FLASH_MS);
+          flash(false);
+        }
+        progress('Working it out…');
+        const done = wait<LagCheck>('done', 20_000);
+        send({ t: 'calibrate', step: 'flashes', at, flashMs: FLASH_MS });
+        return (await done) ?? { ok: false, reason: 'No result came back. Try again.' };
+      } finally {
+        flash(false);
+        waitersRef.current = {};
+      }
+    },
+    [send],
+  );
+
   return {
+    checkCameraTiming,
     server,
     serverDetail,
     panel,
-    setActive: (on) => send({ t: 'control', action: 'active', value: on }),
+    framesUsed,
+    setActive: (on) => {
+      if (!on) {
+        // Stop means silence now — not after a round trip to the server.
+        stopAudio();
+        setCue(false);
+        cueRef.current?.pause();
+      }
+      send({ t: 'control', action: 'active', value: on });
+    },
     setMode: (mode) => send({ t: 'control', action: 'mode', value: mode }),
     say: (text) => send({ t: 'control', action: 'say', value: text }),
+    onboarding: (action) => send({ t: 'control', action: 'onboarding', value: action }),
   };
 }

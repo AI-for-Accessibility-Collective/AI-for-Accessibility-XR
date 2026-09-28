@@ -40,11 +40,19 @@ import type { AbilityModel } from '@ai4a11y/toolkit';
 
 export type GuideMode = 'baseline' | 'toolkit';
 
+// The toolkit doing something, as it happens: the profile read starting, a
+// profile in use, a changed profile picked up, or nothing to adapt to
+// (baseline, an empty store, a failed read).
+export type ToolkitMoment = 'reading' | 'loaded' | 'updated' | 'none';
+
 export interface SessionEvent {
   type: 'user' | 'assistant' | 'status' | 'hud';
   text: string;
   ts: number;
   skill?: string;
+  // Set on the status line that reports a toolkit moment, so a panel can show
+  // it as more than a log row.
+  toolkit?: ToolkitMoment;
 }
 
 export interface PanelBus {
@@ -73,6 +81,9 @@ export interface SessionDeps {
   tasks: Task[];
   vision: VisionClient | null;
   initialMode?: GuideMode;
+  // Debug: told which camera frames go to the model, each time some do (an
+  // empty list = the model was asked without a picture). `what` says why.
+  onFramesUsed?: (what: string, frames: FrameEntry[]) => void;
 }
 
 export interface Session {
@@ -122,7 +133,14 @@ export function createSession(deps: SessionDeps): Session {
   // the baseline take and the toolkit take of one request read the same brief.
   const briefs = new Map<string, Task>();
 
-  const status = (text: string) => deps.panel.emit({ type: 'status', text, ts: Date.now() });
+  const status = (text: string, toolkit?: ToolkitMoment) =>
+    deps.panel.emit({ type: 'status', text, ts: Date.now(), ...(toolkit ? { toolkit } : {}) });
+
+  // Every frame on its way to the model passes through here.
+  const using = (what: string, frames: FrameEntry[]): FrameEntry[] => {
+    deps.onFramesUsed?.(what, frames);
+    return frames;
+  };
 
   function chatInstruction(): string {
     return composePrompt({ profileBlock: block, extra: [readTextAloud.promptBlock ?? ''] });
@@ -138,7 +156,7 @@ export function createSession(deps: SessionDeps): Session {
   const visionVerify =
     deps.vision != null
       ? async (prompt: string): Promise<VerifyResult> => {
-          const fresh: FrameEntry[] = await deps.frames.captureNext(1, 2500);
+          const fresh: FrameEntry[] = using('Checking the step', await deps.frames.captureNext(1, 2500));
           if (!fresh.length) return 'unclear';
           const out = await deps.vision!.generate({
             frames: fresh,
@@ -159,7 +177,7 @@ export function createSession(deps: SessionDeps): Session {
     created = createTaskGuide({
       task,
       mode: render.delivery.mode,
-      engine: { turn: (t) => guideEngine!.turn(t, deps.frames.recent()) },
+      engine: { turn: (t) => guideEngine!.turn(t, using('Guiding the task', deps.frames.recent())) },
       verify: visionVerify,
       // A step that finishes generating after "stop" or a mode switch is dropped.
       say: (t, o) => (gen === modeGen && guide === created && !paused ? deps.speaker.say(t, o) : Promise.resolve()),
@@ -179,7 +197,7 @@ export function createSession(deps: SessionDeps): Session {
     if (!deps.vision) return genericTask(request);
     status('Working out the task from your words and the camera view…');
     try {
-      const task = await generateTaskBrief({ request, frames: deps.frames.recent(), vision: deps.vision });
+      const task = await generateTaskBrief({ request, frames: using('Writing the task brief', deps.frames.recent()), vision: deps.vision });
       if (task.brief.length) {
         briefs.set(briefKey(request), task); // a request-only fallback is not kept: next time tries again
         status(`Brief written by the model — the same one serves both modes: ${task.brief.join(' · ')}`);
@@ -196,7 +214,7 @@ export function createSession(deps: SessionDeps): Session {
   async function handleRead(text: string): Promise<void> {
     if (!deps.vision) return freeTurn(text);
     const gen = modeGen;
-    const frames = await deps.frames.captureNext(2, 3000);
+    const frames = using('Reading text', await deps.frames.captureNext(2, 3000));
     const result = await readVisibleText({ frames, vision: deps.vision });
     if (gen !== modeGen) return;
     if (!result) {
@@ -225,7 +243,7 @@ export function createSession(deps: SessionDeps): Session {
 
   async function freeTurn(text: string): Promise<void> {
     const gen = modeGen;
-    const reply = await ensureChat().turn(text, deps.frames.recent());
+    const reply = await ensureChat().turn(text, using('Answering', deps.frames.recent()));
     if (reply && gen === modeGen && !paused) await deps.speaker.say(reply, { stepId: `chat-${++chatTurns}` });
   }
 
@@ -252,20 +270,22 @@ export function createSession(deps: SessionDeps): Session {
       mode = next;
       if (next === 'toolkit' && deps.tk) {
         // Choosing Toolkit mode is the go-ahead: read the profile and adapt.
+        status('Toolkit mode — reading the profile…', 'reading');
         applyModel(await readModel(deps.tk));
         const n = model?.needs?.length ?? 0;
         status(
           model
             ? `Toolkit mode — profile read · ${n} need${n === 1 ? '' : 's'} · rate ${render.speech.rate}× · ${render.delivery.mode}`
             : 'Toolkit mode — no profile in the store, running with defaults',
+          model ? 'loaded' : 'none',
         );
       } else {
         applyModel(null);
-        status(next === 'toolkit' ? 'Toolkit mode requested but no toolkit store — running baseline' : 'Baseline mode — raw model output, default delivery');
+        status(next === 'toolkit' ? 'Toolkit mode requested but no toolkit store — running baseline' : 'Baseline mode — raw model output, default delivery', 'none');
       }
     } catch (e) {
       applyModel(null);
-      status(`Mode switch failed — running with defaults: ${errorText(e)}`);
+      status(`Mode switch failed — running with defaults: ${errorText(e)}`, 'none');
     } finally {
       switching = false;
     }
@@ -292,6 +312,7 @@ export function createSession(deps: SessionDeps): Session {
       status(
         `Profile updated · ${n} need${n === 1 ? '' : 's'} · rate ${render.speech.rate}× · ${render.delivery.mode}` +
           (guide?.active ? ' · the running task keeps its pacing until the next one' : ''),
+        model ? 'updated' : 'none',
       );
     } catch (e) {
       status(`Profile re-read failed — keeping the last one: ${errorText(e)}`);

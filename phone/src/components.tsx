@@ -2,7 +2,7 @@
 // own accessibility role, label and state, so the screen reads correctly with
 // VoiceOver / TalkBack without the screen having to think about it.
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { radius, space, touch, type, usePalette } from './theme';
 
@@ -91,7 +91,37 @@ export function Button(props: {
   );
 }
 
-// Two-way choice. Behaves as a radio group for assistive tech.
+// A card that stays folded until its title is pressed. What is inside is not
+// mounted while it is folded, so a picture in there costs nothing unseen.
+export function Disclosure(props: { title: string; summary?: string; children: ReactNode }) {
+  const c = usePalette();
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityLabel={props.summary ? `${props.title}. ${props.summary}` : props.title}
+        accessibilityState={{ expanded: open }}
+        hitSlop={8}
+        style={({ pressed }) => [styles.disclosureHead, pressed ? styles.pressed : null]}
+      >
+        <Text style={[styles.cardTitle, { color: c.textMuted }]}>{props.title}</Text>
+        {props.summary && !open ? (
+          <Text style={[styles.disclosureSummary, { color: c.textMuted }]} numberOfLines={1}>
+            {props.summary}
+          </Text>
+        ) : (
+          <View style={styles.flex} />
+        )}
+        <Text style={[styles.disclosureGlyph, { color: c.textMuted }]}>{open ? '▾' : '▸'}</Text>
+      </Pressable>
+      {open ? props.children : null}
+    </View>
+  );
+}
+
+// A choice between two or three options. Behaves as a radio group for assistive tech.
 export function Segmented<T extends string>(props: {
   label: string;
   value: T | null;
@@ -118,7 +148,7 @@ export function Segmented<T extends string>(props: {
             accessibilityState={{ selected, disabled: !!props.disabled }}
             style={[styles.segment, selected ? { backgroundColor: c.accent } : null]}
           >
-            <Text style={[styles.segmentText, { color: selected ? c.onAccent : c.text }]}>
+            <Text style={[styles.segmentText, { color: selected ? c.onAccent : c.text }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
               {selected ? '✓ ' : ''}
               {o.label}
             </Text>
@@ -171,8 +201,11 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: type.body, fontWeight: '600' },
   buttonTextLarge: { fontSize: type.lead, fontWeight: '700' },
   segmented: { flexDirection: 'row', borderRadius: radius.md, borderWidth: 1, padding: 4, gap: 4 },
-  segment: { flex: 1, minHeight: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  segment: { flex: 1, minHeight: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center', paddingHorizontal: space.xs },
   segmentText: { fontSize: type.body, fontWeight: '600' },
+  disclosureHead: { flexDirection: 'row', alignItems: 'center', gap: space.sm, minHeight: 28 },
+  disclosureSummary: { flex: 1, fontSize: type.caption, textAlign: 'right' },
+  disclosureGlyph: { fontSize: type.lead },
   pulse: { width: 12, height: 12, borderRadius: radius.pill },
   flex: { flex: 1 },
   pressed: { opacity: 0.75 },

@@ -55,6 +55,9 @@ export interface SegmenterEvents {
   onUtterance(pcm: Buffer, tentativeHeld: boolean): void;
   onTentative?(pcm: Buffer): void;
   onTentativeWithdrawn?(): void;
+  // The person has started talking. `agoMs` is how long before this call their
+  // first sound was (the run of speech it takes to be sure, plus the pre-roll).
+  onStart?(agoMs: number): void;
 }
 
 export function createSegmenter(handler: ((pcm: Buffer) => void) | SegmenterEvents, opts: SegmenterOpts = {}) {
@@ -116,6 +119,7 @@ export function createSegmenter(handler: ((pcm: Buffer) => void) | SegmenterEven
           current = preRoll;
           preRoll = [];
           quietRun = 0;
+          events.onStart?.(minSpeechWindows * WINDOW_MS);
         }
       }
     },

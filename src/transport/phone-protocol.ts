@@ -18,10 +18,32 @@ export type GuideModeWire = 'baseline' | 'toolkit';
 // What the guide is doing right now, so the wearer is never left guessing.
 export type GuidePhase = 'idle' | 'listening' | 'thinking' | 'speaking';
 
+// The spoken setup (runtime/onboarding.ts) as a screen shows it. It is a third
+// thing the guide can be doing, next to the two modes — `mode` keeps saying
+// which of those it will return to.
+export interface OnboardingPanel {
+  active: boolean;
+  // Onboarding is the mode the wearer has PICKED — the tab stays on it while
+  // the guide is off, and Start begins the setup. Without this the choice was
+  // lost on every Stop and the tab jumped back to whichever mode was beneath.
+  chosen: boolean;
+  beat: number; // 0 while it says hello, then 1…beats
+  beats: number;
+  title: string; // the beat in a word ("Pace"), for a progress label
+  // What is being asked right now. Shown as text whatever the captions need
+  // says — this IS the setup that decides it.
+  question: string;
+  // Once it has ended: what was chosen, a few words each. Empty before that.
+  summary: string[];
+}
+
 export interface PanelState {
   active: boolean;
   mode: GuideModeWire;
   phase: GuidePhase;
+  // Whether the "working on it" sound should be playing. Not simply "phase is
+  // thinking": the sound waits until the spoken acknowledgement has finished.
+  cue: boolean;
   // The last thing the guide understood the wearer to say.
   heard: string;
   lastLine: string;
@@ -29,6 +51,19 @@ export interface PanelState {
   status: string;
   // Why Gemini is off for the rest of this server run, or null.
   geminiOff: string | null;
+  // Absent from a server that predates the spoken setup.
+  onboarding?: OnboardingPanel;
+}
+
+// Debug: the camera frames the model was shown for the turn it is working on.
+// Only paths travel here; the app fetches the pictures (GET, from this server)
+// when its Debug section is open.
+export interface FramesUsed {
+  // Why the model was looking, in words ("Answering", "Reading text").
+  what: string;
+  at: number; // when they were sent to the model (server clock, ms)
+  // Oldest first, as the model got them. Empty: it was asked without a picture.
+  frames: Array<{ path: string; takenAt: number }>;
 }
 
 // ── phone → server ───────────────────────────────────────────────────────────
@@ -38,7 +73,21 @@ export type UpMessage =
   | { t: 'control'; action: 'active'; value: boolean }
   | { t: 'control'; action: 'mode'; value: GuideModeWire }
   | { t: 'control'; action: 'say'; value: string }
+  // The spoken setup: begin it (the guide must be on — it is a conversation),
+  // or end it early, keeping what was chosen so far.
+  | { t: 'control'; action: 'onboarding'; value: 'start' | 'cancel' }
   | { t: 'reply'; id: number; ok: boolean; detail?: string } // answers a DownRequest
+  // Clock check: answered at once with the server's time, so the phone can
+  // report instants on the server's clock (camera-lag.ts).
+  | { t: 'clock'; at: number }
+  // Camera timing test: 'begin' asks the server to start watching frame
+  // brightness; 'flashes' reports when the screen went white (server clock).
+  | { t: 'calibrate'; step: 'begin' }
+  | { t: 'calibrate'; step: 'flashes'; at: number[]; flashMs: number }
+  // What the glasses say about their own camera stream (starting, streaming,
+  // reconnecting, error…), passed on so a stalled stream explains itself in
+  // the server log.
+  | { t: 'camera-status'; status: string; detail?: string }
   | { t: 'ping' };
 
 // ── server → phone ───────────────────────────────────────────────────────────
@@ -56,8 +105,12 @@ export type DownMessage =
   | { t: 'welcome' }
   | { t: 'refused'; reason: string }
   | { t: 'mic'; on: boolean }
+  | { t: 'clock'; at: number; now: number }
+  | { t: 'calibrate'; ready: boolean; reason?: string }
+  | { t: 'calibrated'; ok: boolean; videoMs?: number; lagMs?: number; samples?: number; spreadMs?: number; reason?: string }
   | { t: 'stop-audio' }
-  | { t: 'state'; state: PanelState };
+  | { t: 'state'; state: PanelState }
+  | { t: 'frames-used'; used: FramesUsed };
 
 // ── the profile editor (HTTP, /webview/profile — profile-api.ts) ─────────────
 // GET answers a ProfileView; POST {key, value} saves one need (null removes

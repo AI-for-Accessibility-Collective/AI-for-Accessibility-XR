@@ -75,11 +75,9 @@ function toView(model: AbilityModel | null, state: SessionState): ProfileView {
       effect: effectOf(model, spec.key),
     });
   }
-  // …then anything else the store holds, unhidden.
-  for (const n of needs) {
-    if (NEED_SPECS.some((s) => s.key === n.dimension)) continue;
-    rows.push({ key: n.dimension, label: n.dimension, help: 'Stored in the profile; this guide has no control for it.', kind: 'other', value: n.value, strength: n.strength, source: n.source });
-  }
+  // Anything else the store holds (a seeded profile's clarity or simplify,
+  // say) still shapes delivery but is not a setting here: three rows is the
+  // whole editor, on purpose (needs-catalog.ts).
   const available: ProfileAvailableView[] = NEED_SPECS.filter((s) => !set.has(s.key)).map((s) => ({
     key: s.key,
     label: s.label,

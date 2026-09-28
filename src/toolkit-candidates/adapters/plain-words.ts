@@ -12,6 +12,10 @@ export function promptLines(r: XRAudioSettings): string[] {
   ];
 }
 
+export function tags(r: XRAudioSettings): string[] {
+  return r.language.simplify ? ['Plain words'] : [];
+}
+
 export function effect(r: XRAudioSettings): string[] {
   return r.language.simplify ? ['Plain everyday words, never jargon', 'The same word for the same thing'] : [];
 }

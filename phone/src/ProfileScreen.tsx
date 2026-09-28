@@ -8,7 +8,7 @@
 // nothing is guessed on the phone. `effect` is what the guide will do with
 // the profile in toolkit mode, straight from the surface.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { ProfileNeedView, ProfileView } from '../../src/transport/phone-protocol.ts';
 import { Button, Card, Segmented } from './components';
@@ -50,14 +50,29 @@ export function ProfileScreen(props: { open: boolean; onClose: () => void }) {
     if (props.open) void run('');
   }, [props.open, run]);
 
+  // The profile changes from elsewhere too — the wearer saying "too fast"
+  // mid-task, the spoken setup, the web page's own editor — so what is on
+  // screen is re-read while this is open, the way /webview does it. Never
+  // while a change of our own is in flight: its answer is the newer truth.
+  const saving = useRef(0);
+  useEffect(() => {
+    if (!props.open) return;
+    const timer = setInterval(() => {
+      if (!saving.current) void call('').then(setView, () => {});
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [props.open]);
+
   // A change shows on its own row at once; the server's answer (the same
   // rows, plus the updated summary) lands afterwards without dimming anything.
   const save = (key: string, value: unknown): void => {
     setView((v) => (v ? { ...v, needs: v.needs.map((n) => (n.key === key ? { ...n, value } : n)) } : v));
     setProblem('');
+    saving.current++;
     void call('', { key, value })
       .then(setView)
-      .catch((e) => setProblem(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setProblem(e instanceof Error ? e.message : String(e)))
+      .finally(() => saving.current--);
   };
   const remove = (n: ProfileNeedView): void =>
     Alert.alert(`Remove “${n.label}”?`, 'The guide goes back to its default for this.', [

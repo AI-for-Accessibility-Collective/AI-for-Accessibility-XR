@@ -135,6 +135,15 @@
   .modeseg button.active { background: var(--ink); color: #fff; }
   .modeseg button.active.tk { background: var(--green); }
   .modeseg button:disabled { opacity: .6; cursor: default; }
+  .modeseg button[aria-pressed="true"]::before { content: "✓ "; }
+  .note.hint { color: #b45309; font-weight: 600; }
+
+  /* The spoken setup: where it is, what it is asking (always as text — it is
+     the setup that decides captions), and the two ways out. */
+  #setup-step { font-weight: 600; color: var(--ink); }
+  #setup-q { font-size: 15px; font-weight: 600; line-height: 1.4; color: var(--ink); min-height: 1.4em; }
+  #setup-summary { padding-left: 18px; font-size: 12.5px; line-height: 1.6; color: var(--ink); }
+  #setup-card .btn { min-height: 36px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 999px; background: var(--ground); color: var(--ink); border: 1px solid var(--line); }
   .chips.adapted .chip { background: var(--green-soft); color: var(--green); border-color: transparent; }
@@ -150,6 +159,7 @@
   .say { display: flex; gap: 6px; }
   .say input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 12.5px; background: var(--card); color: var(--ink); }
   .say input:focus { outline: none; border-color: var(--blue); }
+  .say input:disabled { opacity: .55; }
   #agent-log { display: flex; flex-direction: column; gap: 6px; font-size: 12px; max-height: 200px; overflow-y: auto; }
   .lg { line-height: 1.45; }
   .lg .tg { font-weight: 700; font-size: 10px; letter-spacing: .05em; text-transform: uppercase; margin-right: 6px; }
@@ -258,11 +268,26 @@
         <section class="card" id="mode-card">
           <div class="card-h"><span class="t">Guide mode</span><span class="note" id="mode-status"></span></div>
           <div class="modeseg" id="modeseg">
+            <!-- In the order the demo goes: the guide before setup, the setup,
+                 the guide that uses what setup wrote. -->
             <button data-mode="baseline">Baseline</button>
+            <button data-mode="onboarding" hidden>Onboarding</button>
             <button data-mode="toolkit" class="tk">Toolkit</button>
           </div>
           <div class="chips" id="delivery-chips"></div>
-          <div class="note" id="mode-note"></div>
+          <div class="note" id="mode-note" role="status"></div>
+        </section>
+
+        <!-- The spoken setup, while it runs and just after: a conversation on
+             the glasses; this card only follows it. -->
+        <section class="card" id="setup-card" hidden aria-labelledby="setup-title">
+          <div class="card-h"><span class="t" id="setup-title">Setup</span><span class="note" id="setup-step"></span></div>
+          <div id="setup-q" aria-live="polite"></div>
+          <ul id="setup-summary" hidden></ul>
+          <div class="row" id="setup-actions">
+            <button class="btn" id="setup-skip">Skip this</button>
+            <button class="btn" id="setup-stop">Stop setup</button>
+          </div>
         </section>
 
         <!-- Running the take -->
@@ -390,7 +415,8 @@
   const LABELS = { user: 'You', assistant: 'Guide' };
   function addCaption(e) {
     if (!LABELS[e.type]) return;
-    const speakingOnly = e.type === 'assistant' && !captionsMirror;
+    // The spoken setup is always captioned: it is what decides captions.
+    const speakingOnly = e.type === 'assistant' && !captionsMirror && !(setup && setup.active);
     const el = document.createElement('div');
     el.className = 'cap ' + e.type + (speakingOnly ? ' speaking' : '');
     el.innerHTML = '<span class="who"></span>';
@@ -463,6 +489,10 @@
     const pl = $('power-label');
     pl.textContent = active ? '● Live' : '▶ Start';
     pl.classList.toggle('on', active);
+    // With the guide off, a typed message goes nowhere: say so in the box
+    // rather than swallowing it.
+    sayInput.disabled = $('send').disabled = !active || stopped;
+    sayInput.placeholder = active ? 'Type “help me start the washing machine”' : 'Press ▶ Start to talk to the guide';
   }
   powerInput.onchange = () => {
     if (stopped) return;
@@ -475,11 +505,18 @@
   const modeButtons = Array.from($('modeseg').querySelectorAll('button'));
   let currentMode = 'baseline';
   let lastModeAt = 0;
+  // The spoken setup is the middle tab: the server remembers it as the chosen
+  // mode (`chosen`), whether or not it is running, and `state.mode` underneath
+  // says which of the two it hands back to.
+  let setup = null;
   function renderMode(state) {
-    currentMode = state.mode;
+    const settingUp = !!(setup && setup.chosen);
+    currentMode = settingUp ? 'onboarding' : state.mode;
     const toolkit = state.mode === 'toolkit';
     modeButtons.forEach((b) => {
-      b.classList.toggle('active', b.dataset.mode === state.mode);
+      if (b.dataset.mode === 'onboarding') b.hidden = !setup;
+      b.classList.toggle('active', b.dataset.mode === currentMode);
+      b.setAttribute('aria-pressed', b.dataset.mode === currentMode ? 'true' : 'false');
       b.disabled = state.switching;
     });
     $('mode-status').textContent = state.switching ? 'switching…' : '';
@@ -498,10 +535,39 @@
     ];
     for (const t of items) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = t; chips.appendChild(c); }
     $('mode-note').textContent = state.switching ? ''
+      : settingUp && !active ? 'A short spoken setup on the glasses. Press ▶ Start and it begins.'
+      : settingUp ? 'A short spoken setup on the glasses: hear two ways, pick the one you like.'
       : !toolkit ? 'Same model, raw answer, default delivery.'
-      : state.profileOn ? 'Same model — prompt and delivery adapted to the profile below.'
-      : 'No profile found in the data folder — default delivery.';
+      : state.profileOn ? 'Same model — prompt and delivery adapted to your profile below: from setup, or the defaults if you haven’t done setup.'
+      : 'No profile found in the data folder — default delivery. Onboarding makes one.';
   }
+  function renderSetup() {
+    const running = !!(setup && setup.active);
+    const done = !!(setup && !setup.active && setup.summary && setup.summary.length);
+    $('setup-card').hidden = !running && !done;
+    if (!running && !done) return;
+    $('setup-title').textContent = running ? 'Setup' : 'Setup done';
+    $('setup-step').textContent = !running ? '✓ Toolkit mode is using these choices'
+      : setup.beat > 0 && setup.beat <= setup.beats ? 'Step ' + setup.beat + ' of ' + setup.beats + ' · ' + setup.title : (setup.title || 'Welcome');
+    const q = running ? (setup.question || '') : '';
+    if ($('setup-q').textContent !== q) $('setup-q').textContent = q;
+    $('setup-q').hidden = !running;
+    $('setup-actions').hidden = !running;
+    $('setup-skip').disabled = !q;
+    const list = $('setup-summary');
+    list.hidden = running;
+    if (!running && list.dataset.key !== setup.summary.join('|')) {
+      list.dataset.key = setup.summary.join('|');
+      list.innerHTML = '';
+      for (const line of setup.summary) { const li = document.createElement('li'); li.textContent = line; list.appendChild(li); }
+    }
+  }
+  function postSetup(action) {
+    if (stopped) return;
+    fetch('/onboarding', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) }).then(poll, () => {});
+  }
+  $('setup-skip').onclick = () => sendText('skip'); // the same as saying it
+  $('setup-stop').onclick = () => postSetup('cancel');
   function switchMode(mode) {
     lastModeAt = Date.now();
     renderMode({ mode, switching: true, profileOn: false, rate: 1, deliveryMode: 'continuous', captionsMirror: false });
@@ -529,6 +595,9 @@
   modeButtons.forEach((b) => {
     b.onclick = () => {
       if (stopped || b.dataset.mode === currentMode) return;
+      // With the guide off the server remembers the choice, and ▶ Start begins
+      // the setup instead of the guide's opening line.
+      if (b.dataset.mode === 'onboarding') return postSetup('start');
       if (active) {
         wantedMode = b.dataset.mode;
         const name = wantedMode === 'toolkit' ? 'Toolkit' : 'Baseline';
@@ -548,7 +617,7 @@
   // time. Every answer to a write is the fresh profile, which is what the
   // card re-renders from — a failed write reverts by re-rendering the last
   // good profile. Built with the DOM API (textContent), never markup.
-  const SOURCE_LABELS = { 'setup-script': 'set up', 'onboarding-derived': 'onboarding', 'profile-editor': 'edited here' };
+  const SOURCE_LABELS = { 'setup-script': 'set up', 'onboarding-derived': 'onboarding', 'onboarding-conversation': 'chosen in setup', 'said-during-task': 'you said so', 'profile-editor': 'edited here' };
   const profileBody = $('profile-body');
   const profileMsg = $('profile-msg');
   let profile = null;          // the last profile the server sent
@@ -791,6 +860,8 @@
       if (typeof s.active === 'boolean' && Date.now() - lastActiveAt > 1500) { active = s.active; renderPower(); }
       const st = s.state || {};
       captionsMirror = !!st.captionsMirror;
+      setup = s.onboarding || null;
+      renderSetup();
       if (Date.now() - lastModeAt > 1500) renderMode(st);
       syncProfile(st);
       renderTask(st);

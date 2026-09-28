@@ -33,6 +33,11 @@ export function promptLines(r: XRAudioSettings): string[] {
   return lines;
 }
 
+export function tags(r: XRAudioSettings): string[] {
+  if (r.language.clarity === 'standard') return r.language.sentenceWords != null ? ['Short sentences'] : [];
+  return r.language.clarity === 'clearest' ? ['Action first', 'Step numbers'] : ['Action first'];
+}
+
 export function effect(r: XRAudioSettings): string[] {
   const lines: string[] = [];
   if (r.language.sentenceWords != null) lines.push(`Short sentences (about ${r.language.sentenceWords} words)`);

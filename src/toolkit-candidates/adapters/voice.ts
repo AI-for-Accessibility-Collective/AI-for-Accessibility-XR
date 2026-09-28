@@ -87,6 +87,17 @@ export function styleLine(r: XRAudioSettings, opts: { slower?: boolean } = {}): 
   return `Say the following ${parts.join(', ')}: `;
 }
 
+// Short names for a panel, one per thing styleLine asks the voice for — so a
+// tag is only ever shown for something the voice was actually told. (Pitch is
+// absent: styleLine does not carry it, and film mode turns the swap off.)
+export function tags(r: XRAudioSettings, opts: { slower?: boolean } = {}): string[] {
+  const out: string[] = [];
+  if (opts.slower) out.push('Slower repeat');
+  else if (r.speech.rate < 1.0) out.push(`Slower speech · ${r.speech.rate}×`);
+  if (r.speech.expressiveness === 'steady') out.push('Calm, even tone');
+  return out;
+}
+
 // What the person is told the voice settings do.
 export function effect(r: XRAudioSettings): string[] {
   const lines: string[] = [r.speech.rate === 1 ? 'Normal speed' : `Speaks at ${r.speech.rate}× speed`];

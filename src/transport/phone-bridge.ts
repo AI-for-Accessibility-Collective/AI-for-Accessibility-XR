@@ -1,7 +1,8 @@
 // The server end of the phone link (see phone-protocol.ts). One HTTP server on
 // PORT carries three things: the Express app the phone panel mounts on
 // (/webview), the WebSocket the phone app connects to (/phone), and the
-// one-shot audio clips the phone plays through the glasses (/phone/audio/…).
+// one-shot audio clips the phone plays through the glasses (/phone/audio/…),
+// plus the frames behind the app's Debug section (/phone/frames-used/…).
 //
 // This replaces the @mentra/sdk AppServer. MentraOS Cloud no longer calls us;
 // the phone app dials in, so there is no webhook, package name or API key —
@@ -17,6 +18,7 @@ import {
   PHONE_WS_PATH,
   type DownMessage,
   type DownRequest,
+  type FramesUsed,
   type GuideModeWire,
   type PanelState,
   type UpMessage,
@@ -26,6 +28,9 @@ import {
 const SPEAK_TIMEOUT_MS = 90_000;
 const CAMERA_TIMEOUT_MS = 30_000;
 const CLIP_TTL_MS = 120_000;
+// Debug frames are kept for the last few model calls only: the app shows the
+// newest, and one still being fetched must not vanish under it.
+const FRAMES_USED_KEPT = 3;
 // The phone pings every 20 s; two missed pings and the link is gone.
 const LINK_DEAD_MS = 50_000;
 
@@ -34,13 +39,17 @@ export interface PhoneLink {
   glasses: { connected: boolean; wifi: boolean | null };
   // Play one spoken line through the glasses; resolves when it has finished.
   // Without a clip the phone falls back to its own text-to-speech.
-  speak(text: string, clip: { audio: Uint8Array; mime: string; ext: string } | null): Promise<void>;
+  // Resolves with the phone's own timing: ms from being told to first sound, and ms of playback.
+  speak(text: string, clip: { audio: Uint8Array; mime: string; ext: string } | null): Promise<{ loadMs: number; playMs: number }>;
   stopAudio(): void;
   // Tell the glasses to publish their camera to `url`. Rejects if they refuse.
   startCamera(url: string, video: { fps: number; width: number; height: number; bitrate: number }): Promise<void>;
   stopCamera(): void;
   setMic(on: boolean): void;
   sendState(state: PanelState): void;
+  // Debug: show the app which camera frames just went to the model.
+  sendFramesUsed(what: string, frames: Array<{ jpeg: Buffer; timestamp: number }>): void;
+  send(m: DownMessage): void;
 }
 
 export interface PhoneBridgeHandlers {
@@ -51,6 +60,11 @@ export interface PhoneBridgeHandlers {
   onSetActive(link: PhoneLink, on: boolean): void;
   onSetMode(link: PhoneLink, mode: GuideModeWire): void;
   onSay(link: PhoneLink, text: string): void;
+  // The spoken setup: begin it, or end it early. Optional, so a host without
+  // one simply ignores the control.
+  onOnboarding?(link: PhoneLink, action: 'start' | 'cancel'): void;
+  onCalibrateBegin(link: PhoneLink): void;
+  onCalibrateFlashes(link: PhoneLink, at: number[], flashMs: number): void;
 }
 
 export interface PhoneBridge {
@@ -107,6 +121,17 @@ export function createPhoneBridge(opts: { token: string; handlers: PhoneBridgeHa
     sendAudio(req, res, clip.audio, clip.mime);
   });
 
+  // The frames behind the app's Debug section. Same rule as the clips: the
+  // random id in the path is the credential.
+  const framesUsed: Array<{ id: string; jpegs: Buffer[] }> = [];
+  app.get('/phone/frames-used/:id/:n', (req, res) => {
+    const jpeg = framesUsed.find((u) => u.id === req.params.id)?.jpegs[Number(String(req.params.n).replace(/\.jpg$/, ''))];
+    if (!jpeg) return void res.status(404).end();
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.end(jpeg);
+  });
+
   // The little sounds the phone plays on its own cue (see phone/src/useGuideLink.ts).
   // Served from here rather than built into the app so they can be retuned
   // without reinstalling it.
@@ -140,14 +165,14 @@ export function createPhoneBridge(opts: { token: string; handlers: PhoneBridgeHa
   wss.on('connection', (ws: WebSocket) => {
     let link: PhoneLink | null = null;
     let nextId = 1;
-    const waiting = new Map<number, { resolve: () => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+    const waiting = new Map<number, { resolve: (detail?: string) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
     let lastSeen = Date.now();
 
     const send = (m: DownMessage): void => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m));
     };
-    const request = (m: DownRequest, timeoutMs: number): Promise<void> =>
-      new Promise<void>((resolve, reject) => {
+    const request = (m: DownRequest, timeoutMs: number): Promise<string | undefined> =>
+      new Promise<string | undefined>((resolve, reject) => {
         const timer = setTimeout(() => {
           waiting.delete(m.id);
           reject(new Error(`phone did not answer "${m.t}" in ${timeoutMs / 1000}s`));
@@ -192,13 +217,33 @@ export function createPhoneBridge(opts: { token: string; handlers: PhoneBridgeHa
               setTimeout(() => clips.delete(clipId), CLIP_TTL_MS);
               audioPath = `/phone/audio/${clipId}.${clip.ext}`;
             }
-            await request({ t: 'speak', id: nextId++, text, audioPath }, SPEAK_TIMEOUT_MS);
+            const tSent = Date.now();
+            const detail = await request({ t: 'speak', id: nextId++, text, audioPath }, SPEAK_TIMEOUT_MS);
+            let timing: { loadMs?: number; playMs?: number } = {};
+            try {
+              timing = detail ? JSON.parse(detail) : {};
+            } catch {
+              /* an older app answers with no timing */
+            }
+            return { loadMs: timing.loadMs ?? 0, playMs: timing.playMs ?? Date.now() - tSent };
           },
           stopAudio: () => send({ t: 'stop-audio' }),
-          startCamera: (url, video) => request({ t: 'camera-start', id: nextId++, url, ...video }, CAMERA_TIMEOUT_MS),
+          startCamera: (url, video) => request({ t: 'camera-start', id: nextId++, url, ...video }, CAMERA_TIMEOUT_MS).then(() => undefined),
           stopCamera: () => send({ t: 'camera-stop', id: nextId++ }),
           setMic: (on) => send({ t: 'mic', on }),
           sendState: (state) => send({ t: 'state', state }),
+          send,
+          sendFramesUsed(what, frames) {
+            const id = randomUUID();
+            framesUsed.push({ id, jpegs: frames.map((f) => f.jpeg) });
+            while (framesUsed.length > FRAMES_USED_KEPT) framesUsed.shift();
+            const used: FramesUsed = {
+              what,
+              at: Date.now(),
+              frames: frames.map((f, n) => ({ path: `/phone/frames-used/${id}/${n}.jpg`, takenAt: f.timestamp })),
+            };
+            send({ t: 'frames-used', used });
+          },
         };
         current = { link, ws };
         send({ t: 'welcome' });
@@ -216,13 +261,24 @@ export function createPhoneBridge(opts: { token: string; handlers: PhoneBridgeHa
           if (m.action === 'active') handlers.onSetActive(link, !!m.value);
           else if (m.action === 'mode' && (m.value === 'baseline' || m.value === 'toolkit')) handlers.onSetMode(link, m.value);
           else if (m.action === 'say' && typeof m.value === 'string' && m.value.trim()) handlers.onSay(link, m.value.trim());
+          else if (m.action === 'onboarding' && (m.value === 'start' || m.value === 'cancel')) handlers.onOnboarding?.(link, m.value);
+          break;
+        case 'camera-status':
+          console.log(`[camera] glasses report: ${String(m.status)}${m.detail ? ` — ${String(m.detail).slice(0, 200)}` : ''}`);
+          break;
+        case 'clock':
+          send({ t: 'clock', at: m.at, now: Date.now() });
+          break;
+        case 'calibrate':
+          if (m.step === 'begin') handlers.onCalibrateBegin(link);
+          else if (Array.isArray(m.at) && m.at.every((v) => typeof v === 'number')) handlers.onCalibrateFlashes(link, m.at, Number(m.flashMs) || 500);
           break;
         case 'reply': {
           const w = waiting.get(m.id);
           if (!w) break;
           waiting.delete(m.id);
           clearTimeout(w.timer);
-          if (m.ok) w.resolve();
+          if (m.ok) w.resolve(m.detail);
           else w.reject(new Error(m.detail || 'the phone reported a failure'));
           break;
         }

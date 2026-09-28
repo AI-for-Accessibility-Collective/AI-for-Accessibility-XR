@@ -3,6 +3,7 @@
 
 import { describe, expect, test } from 'bun:test';
 import { renderXRAudioSettings } from '../src/toolkit-candidates/xr-audio.ts';
+import { adaptationTags } from '../src/toolkit-candidates/effect.ts';
 import type { AbilityModel } from '@ai4a11y/toolkit';
 import fixture from './fixtures/margaret.blob.json';
 
@@ -78,5 +79,24 @@ describe('individual derivations', () => {
     expect(r.speech.expressiveness).toBe('steady');
     expect(r.delivery.mode).toBe('continuous');
     expect(r.speech.pauseAfterUtteranceMs).toBe(250);
+  });
+});
+
+describe('adaptationTags — what shaped one spoken line', () => {
+  const labels = (via: 'wording' | 'voice', tags: ReturnType<typeof adaptationTags>) => tags.filter((t) => t.via === via).map((t) => t.label);
+
+  test('margaret: the prompt adapters as wording, the delivery adapters as voice; captions shape no line', () => {
+    const tags = adaptationTags(renderXRAudioSettings(margaret));
+    expect(labels('wording', tags)).toEqual(['Action first', 'Plain words', 'Gist first']);
+    expect(labels('voice', tags)).toEqual(['One step at a time', 'Slower speech · 0.8×', 'Calm, even tone']);
+  });
+
+  test('the slowed replay names itself in place of the rate', () => {
+    expect(labels('voice', adaptationTags(renderXRAudioSettings(margaret), { slower: true }))).toContain('Slower repeat');
+  });
+
+  test('only what styleLine tells the voice is tagged: a faster rate and a low pitch are not', () => {
+    const m = { ...margaret, needs: [{ dimension: 'readAloudRate', value: 1.2, strength: 'preference' }, { dimension: 'voicePitch', value: 'low', strength: 'preference' }, { dimension: 'clarity', value: 'standard', strength: 'preference' }] } as AbilityModel;
+    expect(adaptationTags(renderXRAudioSettings(m))).toEqual([]);
   });
 });

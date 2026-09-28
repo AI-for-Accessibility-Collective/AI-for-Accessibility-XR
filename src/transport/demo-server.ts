@@ -26,6 +26,7 @@
 import type { FrameStore } from './frames.ts';
 import type { SessionEvent, SessionState, GuideMode } from '../runtime/session.ts';
 import { createProfileApi, type ProfileApiDeps } from './profile-api.ts';
+import type { OnboardingPanel } from './phone-protocol.ts';
 
 export type DemoEvent = SessionEvent;
 export type DemoSource = 'file' | 'webcam' | 'glasses' | 'rtmp' | 'none';
@@ -60,6 +61,11 @@ export interface DemoServerOptions {
   // The profile editor: the store handle and the session refresh. Absent →
   // the /profile routes answer 409 and the page's card stays read-only.
   profile?: Pick<ProfileApiDeps, 'toolkit' | 'onProfileChanged'>;
+  // The spoken setup (runtime/onboarding.ts): begin it or end it early, and
+  // its progress for /status. Only the glasses app has one; absent → the
+  // page hides its Onboarding tab.
+  onOnboarding?: (action: 'start' | 'cancel') => void;
+  onboardingState?: () => OnboardingPanel | null;
   // Synthesize speech for the demo speaker (Gemini TTS, style line applied by
   // the caller from the live render). No-op if absent.
   tts?: (text: string) => Promise<{ audio: Uint8Array; mime: string } | null>;
@@ -83,7 +89,7 @@ export interface DemoServerHandle {
   stop: () => void;
   emit: (e: DemoEvent) => void;
   update: (
-    partial: Partial<Pick<DemoServerOptions, 'onSay' | 'source' | 'currentClipId' | 'onSetActive' | 'onSetMode'>> & {
+    partial: Partial<Pick<DemoServerOptions, 'onSay' | 'source' | 'currentClipId' | 'onSetActive' | 'onSetMode' | 'onOnboarding'>> & {
       // Backend-initiated switch state (a safety net or the guard paused Gemini).
       active?: boolean;
     },
@@ -113,6 +119,7 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
   let source = opts.source;
   let onSetActive = opts.onSetActive;
   let onSetMode = opts.onSetMode;
+  let onOnboarding = opts.onOnboarding;
   const onSetSource = opts.onSetSource;
   let currentClipId = opts.currentClipId;
   let active = false; // start STOPPED; the page's Start switch resumes
@@ -229,10 +236,17 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
         let timer: ReturnType<typeof setInterval> | null = null;
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
+            // Only a new picture is sent; an unchanged one is repeated every
+            // couple of seconds as a keep-alive (see webview.ts).
+            let lastSent: Buffer | null = null;
+            let lastSentAt = 0;
             timer = setInterval(() => {
               if (source === 'none') return;
               const jpeg = opts.frames.latest();
               if (!jpeg) return;
+              if (jpeg === lastSent && Date.now() - lastSentAt < 2000) return;
+              lastSent = jpeg;
+              lastSentAt = Date.now();
               try {
                 controller.enqueue(
                   enc.encode(
@@ -317,7 +331,22 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
           canSetMode: !!onSetMode,
           canShutdown: !!opts.onShutdown,
           state: opts.sessionState(),
+          onboarding: (onOnboarding && opts.onboardingState?.()) || null,
         });
+      }
+
+      // The spoken setup: begin it, or end it early.
+      if (path === '/onboarding' && req.method === 'POST') {
+        if (!onOnboarding) return new Response('no spoken setup here', { status: 409 });
+        humanActed();
+        try {
+          const body = (await req.json()) as { action?: unknown };
+          if (body.action !== 'start' && body.action !== 'cancel') return new Response('bad action', { status: 400 });
+          onOnboarding(body.action);
+        } catch {
+          return new Response('Bad JSON', { status: 400 });
+        }
+        return new Response(null, { status: 204 });
       }
 
       // The page's ■ Stop button. Answer first, then let the host shut down.
@@ -475,6 +504,7 @@ export function startDemoServer(opts: DemoServerOptions): DemoServerHandle {
       if (partial.currentClipId !== undefined) currentClipId = partial.currentClipId;
       if (partial.onSetActive) onSetActive = partial.onSetActive;
       if (partial.onSetMode) onSetMode = partial.onSetMode;
+      if (partial.onOnboarding) onOnboarding = partial.onOnboarding;
       if (typeof partial.active === 'boolean') active = partial.active;
     },
   };

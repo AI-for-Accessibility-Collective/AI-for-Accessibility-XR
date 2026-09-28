@@ -7,13 +7,20 @@
 //               away, because it has nothing left to say.
 //   Guide       one big switch, what the guide is doing right now (listening,
 //               thinking, speaking), what it heard and what it said.
+//   Setup       only while the spoken setup runs (the Onboarding tab of the
+//               mode picker): the step, the question as text, two ways out.
+//               Afterwards, what was chosen.
+//   Debug       folded away at the bottom: the camera frames the model was
+//               shown for the turn it is answering.
 //
 // Everything clever happens on the server; see useGuideLink.ts.
 
 import { useEffect, useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
+  Modal,
   PermissionsAndroid,
   Platform,
   Pressable,
@@ -30,11 +37,11 @@ import { File, Paths } from 'expo-file-system';
 import { useKeepAwake } from 'expo-keep-awake';
 import BluetoothSdk, { DeviceModels, type Device } from '@mentra/bluetooth-sdk';
 import { useMentraBluetooth } from '@mentra/bluetooth-sdk/react';
-import type { GuideModeWire, GuidePhase, PanelState } from '../../src/transport/phone-protocol.ts';
-import { Button, Card, Pulse, Segmented, StatusRow, type Tone } from './components';
+import type { FramesUsed, GuideModeWire, GuidePhase, PanelState } from '../../src/transport/phone-protocol.ts';
+import { Button, Card, Disclosure, Pulse, Segmented, StatusRow, type Tone } from './components';
 import { ProfileScreen } from './ProfileScreen';
 import { radius, space, type, usePalette } from './theme';
-import { useGuideLink } from './useGuideLink';
+import { SERVER_URL, useGuideLink, type LagCheck } from './useGuideLink';
 
 // Remember the glasses across launches so the app reconnects on its own.
 const DEVICE_FILE = 'default-glasses.json';
@@ -78,11 +85,32 @@ function errorText(e: unknown): string {
 // UI work without glasses: build with EXPO_PUBLIC_PREVIEW=live to see the
 // running screen filled with a stand-in session. Never set in a real build.
 const PREVIEW: PanelState | null =
-  process.env.EXPO_PUBLIC_PREVIEW === 'live'
+  process.env.EXPO_PUBLIC_PREVIEW === 'setup'
     ? {
         active: true,
         mode: 'toolkit',
         phase: 'listening',
+        cue: false,
+        heard: 'the second one',
+        lastLine: 'Would you like everything at once, or one step at a time, where I wait for you?',
+        status: 'Ready — Wearable Task Guide listening',
+        geminiOff: null,
+        onboarding: {
+          active: true,
+          chosen: true,
+          beat: 2,
+          beats: 3,
+          title: 'Steps',
+          question: 'Would you like everything at once, or one step at a time, where I wait for you?',
+          summary: [],
+        },
+      }
+    : process.env.EXPO_PUBLIC_PREVIEW === 'live'
+    ? {
+        active: true,
+        mode: 'toolkit',
+        phase: 'listening',
+        cue: false,
         heard: 'help me start the washing machine',
         lastLine: 'Step one. Open the detergent drawer at the top left of the machine.',
         status: 'Ready — Wearable Task Guide listening',
@@ -97,9 +125,14 @@ const PHASE_TEXT: Record<GuidePhase, string> = {
   speaking: 'Speaking — it listens again when it finishes',
 };
 
-const MODE_TEXT: Record<GuideModeWire, string> = {
+// The spoken setup sits BETWEEN the two modes, where it happens: baseline is
+// the guide before it, and the profile it writes is what toolkit mode then uses.
+type ModeTab = GuideModeWire | 'onboarding';
+
+const MODE_TEXT: Record<ModeTab, string> = {
   baseline: 'The default guide.',
-  toolkit: 'Adapted to the wearer’s profile.',
+  toolkit: 'Uses your profile — from setup, or the defaults if you haven’t done setup.',
+  onboarding: 'A short spoken setup: hear two ways, pick the one you like.',
 };
 
 export default function App() {
@@ -205,6 +238,22 @@ export default function App() {
     : wifi?.state === 'connected' ? { tone: 'ok', detail: `On “${wifi.ssid}”` }
     : { tone: 'warn', detail: 'Not on Wi-Fi. The camera sends video over it.' };
 
+  // ── Camera timing check ───────────────────────────────────────────────────
+  // The guide answers from the frame you were looking at when you began to
+  // speak; for that it needs to know how far the camera runs behind. This
+  // measures it: the screen flashes, the glasses watch.
+  const [lagOpen, setLagOpen] = useState(false);
+  const [lagFlash, setLagFlash] = useState(false);
+  const [lagText, setLagText] = useState('');
+  const [lagResult, setLagResult] = useState<LagCheck | null>(null);
+  const runLagCheck = async (): Promise<void> => {
+    setLagResult(null);
+    setLagOpen(true);
+    const result = await link.checkCameraTiming(setLagFlash, setLagText);
+    setLagResult(result);
+    setLagText('');
+  };
+
   // ── Guide ─────────────────────────────────────────────────────────────────
   const [typed, setTyped] = useState('');
   const [typeOpen, setTypeOpen] = useState(false);
@@ -215,19 +264,22 @@ export default function App() {
     : !connected ? 'Connect the glasses to begin.'
     : null;
 
+  // A take runs in one mode from start to finish: the picker is only on
+  // screen while the guide is off, so this never has to interrupt anything.
   const changeMode = (mode: GuideModeWire): void => {
-    if (!active) return link.setMode(mode);
-    // A take runs in one mode from start to finish, so this can't be silent.
-    Alert.alert('Pause the guide to switch?', 'Switching stops the current task. Press Start again to begin in the new mode.', [
-      { text: 'Keep going', style: 'cancel' },
-      {
-        text: 'Pause and switch',
-        onPress: () => {
-          link.setActive(false);
-          link.setMode(mode);
-        },
-      },
-    ]);
+    if (!active) link.setMode(mode);
+  };
+
+  // ── Spoken setup ──────────────────────────────────────────────────────────
+  // Absent from a server that predates it; the tab is then not offered.
+  const setup = panel?.onboarding;
+  const setupOn = !!setup?.active;
+  // Picked, but not running yet (the guide is off): Start begins it. The server
+  // holds this, so the tab survives a Stop and matches what /webview shows.
+  const setupChosen = !!setup?.chosen;
+  const pickMode = (tab: ModeTab): void => {
+    if (tab !== 'onboarding') return changeMode(tab);
+    link.onboarding('start');
   };
 
   const headline = active ? 'Live' : ready ? 'Ready' : 'Getting ready';
@@ -289,6 +341,17 @@ export default function App() {
               </>
             ) : null}
           </StatusRow>
+          <Divider />
+          <StatusRow
+            tone={lagResult?.ok ? 'ok' : 'idle'}
+            title="Camera timing"
+            detail={
+              lagResult?.ok ? `The camera runs ${(lagResult.videoMs! / 1000).toFixed(1)} s behind. The guide now answers from what you were looking at when you began to speak.`
+              : active ? 'Measure how far the camera runs behind, so answers use the right moment.'
+              : 'Press Start first — the camera has to be streaming.'
+            }
+            action={active ? { label: lagResult?.ok ? 'Check again' : 'Check', onPress: () => void runLagCheck() } : undefined}
+          />
           {problem ? <Notice text={problem} onDismiss={() => setProblem('')} /> : null}
           {ready ? <Button label="Hide details" kind="quiet" onPress={() => setSetupOpen(false)} /> : null}
         </>
@@ -298,17 +361,24 @@ export default function App() {
 
   const modePicker = (
     <View style={s.modeBlock}>
-      <Segmented
+      <Segmented<ModeTab>
         label="Guide mode"
-        value={panel?.mode ?? null}
+        value={setupChosen ? 'onboarding' : panel?.mode ?? null}
         disabled={!panel}
-        onChange={changeMode}
+        onChange={pickMode}
+        // In the order the demo goes: the default guide, then the setup that
+        // makes a profile, then the guide that uses it.
         options={[
           { value: 'baseline', label: 'Baseline' },
+          ...(setup ? [{ value: 'onboarding' as const, label: 'Onboarding' }] : []),
           { value: 'toolkit', label: 'Toolkit' },
         ]}
       />
-      {panel ? <Text style={[s.help, { color: c.textMuted }]}>{MODE_TEXT[panel.mode]}</Text> : null}
+      {panel ? (
+        <Text style={[s.help, { color: c.textMuted }]}>
+          {setupChosen && !active ? 'A short spoken setup. Press Start and it begins.' : MODE_TEXT[setupChosen ? 'onboarding' : panel.mode]}
+        </Text>
+      ) : null}
       <Button label="My profile" kind="secondary" onPress={() => setProfileOpen(true)} disabled={!serverOk} hint="See and change the wearer’s profile" />
     </View>
   );
@@ -344,7 +414,8 @@ export default function App() {
         </Text>
       </View>
 
-      {/* Before a take the mode is part of getting going; during one it steps aside. */}
+      {/* The mode is part of getting going. During a take it is off the screen
+          altogether — nothing on the page that is not about the task in hand. */}
       {!active ? modePicker : null}
 
       {active ? (
@@ -362,8 +433,38 @@ export default function App() {
     </Card>
   );
 
+  // While the setup runs: where it is, what it is asking — always as text,
+  // whatever the captions choice ends up being — and the two ways out, which
+  // send what saying them would. Afterwards: what was chosen.
+  const onboardingCard =
+    !active ? null
+    : setup && setupOn ? (
+      <Card title="Setup">
+        <Text style={[s.setupStep, { color: c.textMuted }]}>
+          {setup.beat > 0 && setup.beat <= setup.beats ? `Step ${setup.beat} of ${setup.beats} · ${setup.title}` : setup.title || 'Welcome'}
+        </Text>
+        <View accessibilityLiveRegion="polite">
+          <Text style={[s.speech, { color: c.text }]}>{setup.question || panel?.lastLine || ''}</Text>
+        </View>
+        <Text style={[s.help, { color: c.textMuted }]}>Answer out loud. “Skip”, “go back” and “say that again” all work.</Text>
+        <View style={s.row}>
+          <Button label="Skip this" kind="secondary" flex onPress={() => link.say('skip')} disabled={!setup.question} hint="Leaves this one as it is and moves on" />
+          <Button label="Stop setup" kind="secondary" flex onPress={() => link.onboarding('cancel')} hint="Ends the setup and keeps what you chose so far" />
+        </View>
+      </Card>
+    ) : setup && setup.summary.length > 0 ? (
+      <Card title="Setup done">
+        <Text style={[s.help, { color: c.ok }]}>✓ Toolkit mode is using your choices.</Text>
+        {setup.summary.map((line) => (
+          <Text key={line} style={[s.setupChoice, { color: c.text }]}>• {line}</Text>
+        ))}
+        <Text style={[s.help, { color: c.textMuted }]}>Change any of it in My profile.</Text>
+      </Card>
+    ) : null;
+
+  // Only while the guide is on: after Stop the page goes back to the essentials.
   const conversation =
-    panel && (panel.heard || panel.lastLine) ? (
+    active && panel && (panel.heard || panel.lastLine) ? (
       <Card title="Conversation">
         {panel.heard ? (
           <View style={s.turn}>
@@ -379,6 +480,33 @@ export default function App() {
         ) : null}
       </Card>
     ) : null;
+
+  const used = link.framesUsed;
+  const debugCard = (
+    <Disclosure title="Debug" summary={used ? framesSummary(used) : undefined}>
+      {!used ? (
+        <Text style={[s.help, { color: c.textMuted }]}>The camera frames sent to the AI show here once the guide has looked at something.</Text>
+      ) : (
+        <>
+          <Text style={[s.help, { color: c.text }]}>
+            {used.what} · sent {new Date(used.at).toLocaleTimeString()}
+          </Text>
+          {used.frames.length === 0 ? (
+            <Text style={[s.help, { color: c.warn }]}>! No camera frame was available — the AI was asked without a picture.</Text>
+          ) : null}
+          {used.frames.map((f, i) => (
+            <View key={f.path} style={s.turn}>
+              <Frame uri={SERVER_URL + f.path} label={`Camera frame ${i + 1} of ${used.frames.length}`} />
+              <Text style={[s.help, { color: c.textMuted }]}>
+                {used.frames.length > 1 ? `Frame ${i + 1} of ${used.frames.length} · ` : ''}
+                taken {((used.at - f.takenAt) / 1000).toFixed(1)} s before it was sent
+              </Text>
+            </View>
+          ))}
+        </>
+      )}
+    </Disclosure>
+  );
 
   return (
     <SafeAreaView style={[s.root, { backgroundColor: c.bg }]}>
@@ -400,22 +528,72 @@ export default function App() {
           {ready ? (
             <>
               {guideCard}
+              {onboardingCard}
               {conversation}
-              {active ? <Card title="Mode">{modePicker}</Card> : null}
               {setupCard}
+              {debugCard}
             </>
           ) : (
             <>
               {setupCard}
               {guideCard}
+              {onboardingCard}
               {conversation}
-              {active ? <Card title="Mode">{modePicker}</Card> : null}
+              {debugCard}
             </>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
       <ProfileScreen open={profileOpen} onClose={() => setProfileOpen(false)} />
+      {/* Full-screen so the flash fills the camera's view. Black between flashes, white during. */}
+      <Modal visible={lagOpen} animationType="fade" onRequestClose={() => setLagOpen(false)} statusBarTranslucent>
+        <View style={[s.lagScreen, { backgroundColor: lagFlash ? '#ffffff' : '#000000' }]}>
+          {!lagFlash ? (
+            <>
+              <Text style={s.lagTitle} accessibilityRole="header">Camera timing</Text>
+              {lagResult ? (
+                <>
+                  <Text style={s.lagBody} accessibilityLiveRegion="polite">
+                    {lagResult.ok
+                      ? `The camera runs ${(lagResult.videoMs! / 1000).toFixed(1)} s behind (seen ${lagResult.samples} flashes, within ${lagResult.spreadMs} ms of each other). Saved — the guide uses it from the next thing you say.`
+                      : lagResult.reason}
+                  </Text>
+                  <View style={s.lagButtons}>
+                    {!lagResult.ok ? <Button label="Try again" onPress={() => void runLagCheck()} /> : null}
+                    <Button label="Done" kind={lagResult.ok ? 'primary' : 'secondary'} onPress={() => setLagOpen(false)} />
+                  </View>
+                </>
+              ) : (
+                <Text style={s.lagBody} accessibilityLiveRegion="polite">{lagText}</Text>
+              )}
+            </>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function framesSummary(used: FramesUsed): string {
+  const n = used.frames.length;
+  return `${used.what} · ${n === 0 ? 'no frame' : n === 1 ? '1 frame' : `${n} frames`}`;
+}
+
+// One camera frame, shown whole at its own shape (16:9 until it has loaded).
+function Frame(props: { uri: string; label: string }) {
+  const c = usePalette();
+  const [aspect, setAspect] = useState(16 / 9);
+  return (
+    <Image
+      source={{ uri: props.uri }}
+      onLoad={(e) => {
+        const { width, height } = e.nativeEvent.source;
+        if (width > 0 && height > 0) setAspect(width / height);
+      }}
+      resizeMode="contain"
+      accessibilityLabel={props.label}
+      style={[s.frame, { aspectRatio: aspect, backgroundColor: c.surfaceAlt }]}
+    />
   );
 }
 
@@ -469,6 +647,10 @@ function Field(props: {
 }
 
 const s = StyleSheet.create({
+  lagScreen: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 28, gap: 16 },
+  lagTitle: { color: '#ffffff', fontSize: 24, fontWeight: '800' },
+  lagBody: { color: '#d7dde6', fontSize: 18, lineHeight: 26, textAlign: 'center' },
+  lagButtons: { alignSelf: 'stretch', gap: 10, marginTop: 8 },
   root: { flex: 1 },
   flex: { flex: 1 },
   scroll: { padding: space.lg, gap: space.lg, paddingBottom: space.xxl },
@@ -489,6 +671,8 @@ const s = StyleSheet.create({
   phase: { flex: 1, fontSize: type.lead, lineHeight: 25 },
   row: { flexDirection: 'row', gap: space.md },
   modeBlock: { gap: space.sm },
+  setupStep: { fontSize: type.body, fontWeight: '700' },
+  setupChoice: { fontSize: type.lead, lineHeight: 26 },
   typeRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm },
   turn: { gap: space.xs },
   who: { fontSize: type.caption, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase' },
@@ -498,6 +682,7 @@ const s = StyleSheet.create({
   fieldLabel: { fontSize: type.caption + 1, fontWeight: '600' },
   inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: radius.md, minHeight: 52, paddingLeft: space.md },
   input: { flex: 1, fontSize: type.body, paddingVertical: space.md },
+  frame: { width: '100%', borderRadius: radius.md },
   pressed: { opacity: 0.8 },
   disabled: { opacity: 0.4 },
 });

@@ -20,16 +20,42 @@ export class FrameStore {
   private lastHash: string | null = null;
   // Pending captureNext() requests waiting for FRESH frames pushed after the call.
   private waiters: Array<{ need: number; got: FrameEntry[]; finish: (f: FrameEntry[]) => void }> = [];
+  // The last half-minute, by arrival time, so a turn can look at what the
+  // camera saw when the wearer STARTED speaking rather than whatever it is
+  // pointing at seconds later, when the model is finally called (by then they
+  // have often looked away — at their phone, at the floor).
+  private history: FrameEntry[] = [];
+  private pinned: FrameEntry[] | null = null;
 
-  constructor(private readonly ringSize: number) {}
+  constructor(
+    private readonly ringSize: number,
+    private readonly historyMs = 30_000,
+  ) {}
+
+  // When the camera last delivered ANYTHING, duplicates included. A still scene
+  // keeps this fresh; a stalled stream does not — which is how the two are
+  // told apart.
+  private lastArrival = 0;
+
+  // The stream has gone quiet: what is held is no longer what the wearer sees.
+  stalled(maxSilenceMs = 6000): boolean {
+    return this.lastArrival > 0 && Date.now() - this.lastArrival > maxSilenceMs;
+  }
+
+  sinceLastArrivalMs(): number | null {
+    return this.lastArrival ? Date.now() - this.lastArrival : null;
+  }
 
   push(jpeg: Buffer): void {
+    this.lastArrival = Date.now();
     const hash = createHash('sha1').update(jpeg).digest('hex').slice(0, 16);
     if (hash === this.lastHash) return; // skip duplicate/static frames
     this.lastHash = hash;
     const entry: FrameEntry = { jpeg, timestamp: Date.now() };
     this.ring.push(entry);
     if (this.ring.length > this.ringSize) this.ring.shift();
+    this.history.push(entry);
+    while (this.history.length && entry.timestamp - this.history[0]!.timestamp > this.historyMs) this.history.shift();
     // Feed any in-flight captureNext() requests with this fresh frame.
     for (const w of [...this.waiters]) {
       w.got.push(entry);
@@ -37,8 +63,44 @@ export class FrameStore {
     }
   }
 
+  // What the engine looks at: the pinned moment while a turn has one, the
+  // newest frames otherwise.
+  // Never a frozen picture: when the stream has stalled the engine is given
+  // no view at all, so the guide says it cannot see rather than describing a
+  // scene from minutes ago as if it were now.
   recent(): FrameEntry[] {
-    return [...this.ring];
+    if (this.stalled()) return [];
+    return this.pinned ? [...this.pinned] : [...this.ring];
+  }
+
+  // The view at `at`, then what followed within `spanMs` — up to `n` frames.
+  // Identical frames are never stored, so the view AT a moment is the newest
+  // frame that had arrived by then, however long ago that was.
+  around(at: number, n = this.ringSize, spanMs = 1200): FrameEntry[] {
+    let i = -1;
+    for (let k = 0; k < this.history.length; k++) {
+      if (this.history[k]!.timestamp <= at) i = k;
+      else break;
+    }
+    if (i < 0) i = 0;
+    return this.history.slice(i, i + n).filter((f, k) => k === 0 || f.timestamp - at <= spanMs);
+  }
+
+  // Hold recent() on the moment `at` until unpin(). Falls back to the live
+  // ring when nothing from that moment is left (or no frame has ever arrived).
+  pin(at: number): void {
+    const frames = this.around(at);
+    this.pinned = frames.length ? frames : null;
+  }
+
+  unpin(): void {
+    this.pinned = null;
+  }
+
+  // The frame a turn is being answered from — for the run record.
+  viewed(): Buffer | null {
+    if (this.stalled()) return null;
+    return this.pinned?.[0]?.jpeg ?? this.latest();
   }
 
   // Capture the next `n` FRESH frames pushed AFTER this call — i.e. aligned to
@@ -64,16 +126,24 @@ export class FrameStore {
     });
   }
 
+  // The newest picture — or nothing, once the stream has gone quiet. A page
+  // showing the last frame of a finished take looks exactly like a live one.
   latest(): Buffer | null {
+    if (this.stalled()) return null;
     return this.ring.length ? this.ring[this.ring.length - 1]!.jpeg : null;
   }
 
   // Drop all buffered frames (e.g. when switching video source) so a stale
   // frame from the old source never lingers on the feed. Resets the dedup hash
   // so the first frame of the new source is always accepted.
+  // Also called at every camera start and stop: a take must never be answered
+  // from (or shown) a picture left over from the one before it.
   clear(): void {
     this.ring = [];
+    this.history = [];
+    this.pinned = null;
     this.lastHash = null;
+    this.lastArrival = 0;
   }
 
   get size(): number {
@@ -112,16 +182,17 @@ export function startFrameCapture(opts: {
   rtmpPort: number;
   captureFps: number;
   onFrame: (jpeg: Buffer) => void;
-}): { stop: () => void } {
-  const playUrl = getPlayUrl(opts.rtmpPort);
+}): { stop: () => void; retarget: (streamKey: string) => void } {
+  let playUrl = getPlayUrl(opts.rtmpPort);
   let stopped = false;
   let frameCount = 0;
   let proc: ChildProcess | null = null;
 
   console.log(`  [frames] capturing from ${playUrl} @ ${opts.captureFps} fps`);
 
+  let respawnNow = false;
   function spawnFfmpeg(): void {
-    if (stopped) return;
+    if (stopped || proc) return;
     proc = spawn(
       'ffmpeg',
       [
@@ -153,18 +224,25 @@ export function startFrameCapture(opts: {
 
     proc.stderr!.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
-      if (msg && !stopped && !msg.includes('Input/output error')) {
+      // While no stream is up the reader times out and retries for ever; these
+      // lines are that, not a fault, and they bury the ones that matter.
+      const idleNoise = /Input\/output error|Output file is empty|No filtered frames|deprecated pixel format|Missing reference picture/;
+      if (msg && !stopped && !idleNoise.test(msg)) {
         console.log(`  [ffmpeg] ${msg}`);
       }
     });
 
+    const mine = proc;
     proc.on('exit', () => {
-      proc = null;
-      if (!stopped) setTimeout(spawnFfmpeg, 3000);
+      if (proc === mine) proc = null;
+      // After a retarget the next reader comes up at once; after an ordinary
+      // exit (no stream yet, stream ended) it waits a moment before retrying.
+      if (!stopped) setTimeout(spawnFfmpeg, respawnNow ? 0 : 3000);
+      respawnNow = false;
     });
     proc.on('error', (err) => {
       console.error('  [ffmpeg] spawn error:', err.message);
-      proc = null;
+      if (proc === mine) proc = null;
       if (!stopped) setTimeout(spawnFfmpeg, 3000);
     });
   }
@@ -172,6 +250,18 @@ export function startFrameCapture(opts: {
   spawnFfmpeg();
 
   return {
+    // Read a different stream from now on (each camera start publishes to a
+    // path of its own). The reader attached to the old path is killed; its
+    // exit handler brings up a new one, which reads the new path.
+    retarget: (streamKey: string) => {
+      playUrl = getPlayUrl(opts.rtmpPort, streamKey);
+      console.log(`  [frames] now reading ${playUrl}`);
+      const old = proc;
+      if (old) {
+        respawnNow = true;
+        old.kill('SIGKILL');
+      } else spawnFfmpeg();
+    },
     stop: () => {
       stopped = true;
       if (proc) {
