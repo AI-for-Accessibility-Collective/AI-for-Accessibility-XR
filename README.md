@@ -3,7 +3,7 @@
 Smart-glasses guidance, shaped by the
 [AI for Accessibility Toolkit](https://github.com/AI-for-Accessibility-Collective/AI-for-Accessibility-Toolkit).
 
-The app is an audio-first guide for Mentra Live glasses. It walks a person
+The app is an audio-first guide for [Mentra Live](https://mentraglass.com/live) glasses. It walks a person
 through a household task one step at a time, and it reads out what they are
 looking at. Gemini writes the guidance live. The toolkit adapts how that
 guidance is worded and spoken to the person's accessibility profile.
