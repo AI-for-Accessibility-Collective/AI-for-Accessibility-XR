@@ -105,7 +105,7 @@ function walkFiles(dir: string, skipNames: Set<string>, rel = ''): string[] {
   return out;
 }
 
-console.log(`wearable-extension system check · model ${config.visionModel} · tts ${config.ttsModel}`);
+console.log(`AI for Accessibility XR system check · model ${config.visionModel} · tts ${config.ttsModel}`);
 
 // ---- offline ----------------------------------------------------------------------
 

@@ -15,21 +15,22 @@ URL=$(env_value PUBLIC_URL)
 URL=${URL%/}
 REMOTE_DIR=a11y-toolkit            # under the server's home directory
 SERVICE=wearable-a11y
+APP=$(basename "$HERE")            # this repo's folder; the same name is used on the server
 
-cd "$HERE/.."                      # toolkitv2/, so both siblings are in reach
+cd "$HERE/.."                      # the parent, so both siblings are in reach
 TGZ=$(mktemp -t a11y-deploy).tgz
 trap 'rm -f "$TGZ"' EXIT
 
 COPYFILE_DISABLE=1 tar czf "$TGZ" \
   --exclude node_modules --exclude .git --exclude '.env' --exclude '.env.example' \
-  --exclude 'wearable-extension/data' --exclude 'wearable-extension/runs' --exclude 'wearable-extension/.tts-cache' --exclude 'wearable-extension/.camera-lag.json' --exclude 'wearable-extension/phone' --exclude bench-out --exclude '*.mov' --exclude '*.mp4' \
-  wearable-extension AI-for-Accessibility-Toolkit/toolkit
+  --exclude "$APP/data" --exclude "$APP/runs" --exclude "$APP/.tts-cache" --exclude "$APP/.camera-lag.json" --exclude "$APP/phone" --exclude bench-out --exclude '*.mov' --exclude '*.mp4' \
+  "$APP" AI-for-Accessibility-Toolkit/toolkit
 
 gcloud compute scp --zone="$ZONE" "$TGZ" "$VM:/tmp/a11y-deploy.tgz"
 gcloud compute ssh "$VM" --zone="$ZONE" --command="set -e
   mkdir -p ~/$REMOTE_DIR && cd ~/$REMOTE_DIR
   tar xzf /tmp/a11y-deploy.tgz && rm /tmp/a11y-deploy.tgz
-  cd wearable-extension && ~/.bun/bin/bun install | tail -1
+  cd $APP && ~/.bun/bin/bun install | tail -1
   sudo systemctl restart $SERVICE && sleep 5
   systemctl is-active $SERVICE
   journalctl -u $SERVICE --since '-15s' --no-pager -o cat | grep '^\[wearable\]' || true"

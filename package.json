@@ -1,7 +1,7 @@
 {
   "name": "wearable-extension",
   "version": "0.1.0",
-  "description": "Wearable Task Guide — audio-first smartglasses demo app over the AI for Accessibility Toolkit (consumed as-is via a local file: link). One app, one model, two toolkit injection points: the profile prompt block (input) and the audio delivery render (output).",
+  "description": "AI for Accessibility XR: an audio-first smart-glasses guide shaped by the AI for Accessibility Toolkit (linked as a sibling checkout). One app, one model, two toolkit touch points: the prompt (input) and the spoken delivery (output).",
   "type": "module",
   "scripts": {
     "demo": "bun src/scripts/drive-core.ts",

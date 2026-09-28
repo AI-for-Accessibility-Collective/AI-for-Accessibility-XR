@@ -102,7 +102,7 @@ if (import.meta.main) {
 
   const targets = pickTargets(procs, cwdOf, ROOTS, self);
   if (!targets.length) {
-    console.log('Nothing from wearable-extension (or the old wearable draft) was running.');
+    console.log('Nothing from AI for Accessibility XR (or the old wearable draft) was running.');
   } else {
     console.log(`Stopping ${targets.length} process${targets.length === 1 ? '' : 'es'}:`);
     for (const pid of targets) console.log(`  ${pid}  ${byPid.get(pid)?.command.slice(0, 110)}`);
