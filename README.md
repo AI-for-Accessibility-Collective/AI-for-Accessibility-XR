@@ -1,11 +1,11 @@
 # AI for Accessibility XR
 
-Smart-glasses guidance, shaped by the
+Smart-glasses guidance, adapted by the
 [AI for Accessibility Toolkit](https://github.com/AI-for-Accessibility-Collective/AI-for-Accessibility-Toolkit).
 
-The app is an audio-first guide for [Mentra Live](https://mentraglass.com/live) glasses. It walks a person
+The app is an audio-first guide for [Mentra Live](https://mentraglass.com/live) glasses. It guides a person
 through a household task one step at a time, and it reads out what they are
-looking at. Gemini writes the guidance live. The toolkit adapts how that
+looking at. Gemini generates the guidance at run time. The toolkit adapts how that
 guidance is worded and spoken to the person's accessibility profile.
 
 The same app runs in two modes. **Baseline** speaks with default delivery.
@@ -14,23 +14,23 @@ same task is how the difference is shown (`docs/DESIGN.md`).
 
 ## How it uses the toolkit
 
-The toolkit knows the person. This app knows the glasses and the task. The
-toolkit holds the profile, and the app reads it from there.
+The toolkit stores the person's profile. This app handles the glasses and
+the task, and reads the profile from the toolkit.
 
 The toolkit runs inside the app as a library. The app calls it at two moments:
 
 1. **Start.** The app opens the toolkit on its data folder, where the profile
-   lives. The code is `src/toolkit/host.ts`, and it is the app's whole
-   surface onto the toolkit.
+   is stored. The code is `src/toolkit/host.ts`. All of the app's calls into
+   the toolkit go through that file.
 2. **Read.** When Toolkit mode is on, the app asks the toolkit for the
    profile. A surface turns the profile into audio settings, and adapters
-   carry those settings out. The code is in `src/toolkit-candidates/`.
+   apply those settings. The code is in `src/toolkit-candidates/`.
 
-The settings land in two places:
+The settings are applied in two places:
 
 - **The prompt.** The profile adds directives such as plain words, or one
-  step at a time. The person's free text stays out of the prompt.
-- **The delivery.** The profile shapes speaking rate, chunk length, pauses
+  step at a time. The person's free text is left out of the prompt.
+- **The delivery.** The profile sets speaking rate, chunk length, pauses
   and captions.
 
 Baseline skips the read and speaks with defaults.
@@ -43,20 +43,22 @@ The toolkit is built in three layers. This app follows the same three.
 |---|---|---|
 | **Profile** | What the person needs: speech rate, plain language, captions | The toolkit |
 | **Surface** | Turns needs into settings for one medium. It makes the decisions, and the adapters act on them. | The toolkit's XR surface, plus `xr-audio.ts` in this repo. The XR surface was built for headsets you look through. The add-on covers pacing, pauses and pitch. |
-| **Adapters** | Each carries out one kind of setting | This repo: prompt directives, paced delivery, voice. The toolkit's own adapters are written for web pages, so glasses need their own. |
+| **Adapters** | Each applies one kind of setting | This repo: prompt directives, paced delivery, voice. The toolkit's own adapters are written for web pages, so glasses need their own. |
 
-The add-on surface and the adapters sit in `src/toolkit-candidates/`. That
+The add-on surface and the adapters are in `src/toolkit-candidates/`. That
 folder's imports come from the toolkit and from itself, and a test checks
-this. The code was written here first and is meant to move into the toolkit.
+this. The code was written here first and is intended to be moved into the
+toolkit.
 The folder's README lists what would move, and in what order.
 
-The toolkit is used as it is. Changes wanted in it go to that repo.
+The toolkit is used unmodified. Requests for changes to it belong in that
+repo.
 
 ## What is in the repo
 
 ```
 src/toolkit/             the app's calls into the toolkit, and the needs it can write
-src/toolkit-candidates/  the audio surface and the adapters, meant to move upstream
+src/toolkit-candidates/  the audio surface and the adapters, to be moved upstream
 src/engine/              Gemini: content turns, vision, speech to text, text to speech
 src/runtime/             a session (one take and its turns), the spoken setup, take recording
 src/skills/              the task guide, the read-aloud skill, the task brief
@@ -71,7 +73,7 @@ docs/                    design, plan, runbook
 
 - **bun**, **node 22+**, and **ffmpeg** (`brew install ffmpeg`). Without
   ffmpeg, the webcam is the one source that works.
-- A **Gemini API key** from Google AI Studio. It goes in `.env`, which git
+- A **Gemini API key** from Google AI Studio. Put it in `.env`, which git
   ignores.
 - The toolkit repo cloned **next to** this one. The app links it as a sibling:
 
@@ -109,22 +111,22 @@ headphones if you can, because the mic can hear the guide's own voice.
 
 ## 2. Run it on the glasses (Mentra Live)
 
-Three pieces:
+Three parts:
 
 ```
 glasses ⇄ Bluetooth ⇄ phone app (phone/) ⇄ internet ⇄ guide server (src/)
 glasses ────────── camera, over Wi-Fi ──────────────▶ guide server
 ```
 
-- The **phone app** (`phone/`, React Native on Mentra's Bluetooth SDK) holds
-  the link to the glasses. It forwards the glasses microphone to the server.
+- The **phone app** (`phone/`, React Native on Mentra's Bluetooth SDK) maintains
+  the Bluetooth connection to the glasses. It forwards the glasses microphone to the server.
   It plays the guide's voice, which the phone routes to the glasses speaker.
-  It tells the glasses where to send their camera. It stands in for the
-  Mentra app here, and it talks to the glasses directly over Bluetooth.
+  It tells the glasses where to send their camera. It replaces the Mentra
+  app in this setup.
 - The **guide server** (this repo's `src/`) runs on a server of your own.
-  Ours is a small GCP VM with nginx in front for HTTPS. Its name and URL go
+  Ours is a small GCP VM, with nginx handling HTTPS. Its name and URL go
   in this repo's `.env` (see `.env.example`). It turns speech into text, runs
-  Gemini and the toolkit, and makes the voice.
+  Gemini and the toolkit, and produces the speech audio.
 
 ### One-time setup
 
@@ -134,15 +136,15 @@ glasses ────────── camera, over Wi-Fi ───────�
    once.
 2. **Server.** `bun run deploy` uploads this repo and the sibling toolkit,
    then restarts the systemd service `wearable-a11y`. On the server the app
-   lives in `~/a11y-toolkit/<this folder's name>`, and nginx forwards the URL
-   to it. Deploying leaves the server's `.env` and `data/` alone. The server
+   is installed in `~/a11y-toolkit/<this folder's name>`, and nginx forwards the URL
+   to it. Deploying keeps the server's `.env` and `data/` unchanged. The server
    `.env` differs from `.env.example` in:
 
    | Key | Value |
    |---|---|
    | `BRIDGE_TOKEN` | the shared secret the phone app must present |
    | `ADMIN_PASSWORD` | what a browser is asked for at `/webview` and `/webview/runs` |
-   | `RTMP_HOST` | the server's public IP. The glasses publish RTMP straight to it. |
+   | `RTMP_HOST` | the server's public IP. The glasses publish RTMP directly to it. |
    | `PORT`, `RTMP_PORT`, `DEMO_PORT` | 3700, 1936 (open in the GCP firewall), 3701 |
 
 3. **Phone app.** Needs Xcode (iPhone) or Android Studio (Android), and the
@@ -155,9 +157,9 @@ glasses ────────── camera, over Wi-Fi ───────�
    bun run ios:release       # or: bun run android:release
    ```
 
-   The `:release` builds run on their own. `bun run ios` and
+   The `:release` builds run standalone. `bun run ios` and
    `bun run android` make a development build that needs this laptop running
-   `bun run start`. The URL and token are baked in at build time, so rebuild
+   `bun run start`. The URL and token are set at build time, so rebuild
    after changing them. On an iPhone, the first build asks you to pick a
    signing team in Xcode (`phone/ios/*.xcworkspace`, Signing & Capabilities).
 
@@ -167,7 +169,7 @@ glasses ────────── camera, over Wi-Fi ───────�
    **Connected**.
 2. **Scan for glasses**, then **Connect**. The app remembers them and
    reconnects next time. On an iPhone, also select the glasses in Settings ›
-   Bluetooth so the voice comes out of them. Android asks to pair on its own.
+   Bluetooth so audio plays through them. Android asks to pair on its own.
 3. If *Wi-Fi* says not connected, enter a network there. The camera streams
    over Wi-Fi, and a phone hotspot works.
 4. Press **▶ Start**. That one switch turns on Gemini, the camera and the
@@ -179,17 +181,16 @@ glasses ────────── camera, over Wi-Fi ───────�
 ```bash
 gcloud compute ssh "$DEPLOY_VM" --zone="$DEPLOY_ZONE"  # then, on the server:
 journalctl -u wearable-a11y -f                         # logs: phone, camera, status changes
-sudo systemctl stop wearable-a11y                      # off for good (■ Stop restarts it)
+sudo systemctl stop wearable-a11y                      # stops it until started again (■ Stop restarts it)
 ```
 
-To see what the glasses see, tunnel the demo page, which listens on the
+To view the camera stream, tunnel the demo page, which listens on the
 server's localhost:
 `gcloud compute ssh "$DEPLOY_VM" --zone="$DEPLOY_ZONE" -- -L 3701:localhost:3701`,
 then open http://localhost:3701.
 
-The guide listens between its own lines, so its voice stays out of the
-microphone. Wait for a line to finish before saying *"done"*, or press the
-button.
+The microphone is off while the guide is speaking. Wait for a line to finish
+before saying *"done"*, or press the button.
 
 The first run on a new pair of glasses is a bring-up session
 (`docs/CHECKING.md` §6). Bluetooth audio routing, the camera stream and
@@ -201,7 +202,8 @@ hearing *"done"* in a real room are the usual things to adjust.
 from any terminal. Each turns Gemini off first, then shuts the app down. End a
 session with `bun run stop`. It stops anything left over and confirms Gemini
 is off. On its own, the app pauses Gemini when the page is
-closed or after 15 idle minutes, and turns it off if requests run away.
+closed or after 15 idle minutes, and turns it off past the call limits in
+`.env`.
 
 ## 4. Check it
 
@@ -222,11 +224,11 @@ troubleshooting table are in `docs/CHECKING.md`.
 `../AI-for-Accessibility-Toolkit/toolkit`, checked against commit
 **`a71b34a`** of the toolkit repo. `bun run check` fails if the sibling
 tracks a different remote. Bun installs it as symlinks into the checkout, so
-toolkit edits apply straight away. Added or removed files need `bun install`.
+toolkit edits apply immediately. Added or removed files need `bun install`.
 
 ## More
 
-- `docs/DESIGN.md`: the two-mode comparison and the rules that keep it fair
+- `docs/DESIGN.md`: the two-mode comparison and the rules for a fair comparison
 - `docs/PLAN.md`: build plan and source layout
 - `docs/CHECKING.md`: the runbook
 - `src/toolkit-candidates/README.md`: what should move into the toolkit
