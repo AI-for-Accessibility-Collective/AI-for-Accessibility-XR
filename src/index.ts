@@ -23,6 +23,7 @@ import { dropPublishersExcept, getPublishUrl, newStreamKey, startRtmpServer, sto
 import { startDemoServer, type DemoServerHandle } from './transport/demo-server.ts';
 import { mountWebview, type WebviewHandle } from './transport/webview.ts';
 import { mountRuns } from './transport/runs-web.ts';
+import { createGuard } from './transport/admin-auth.ts';
 import { createPhoneBridge, type PhoneLink } from './transport/phone-bridge.ts';
 import { brightness, loadLag, saveLag, solveLag } from './transport/camera-lag.ts';
 import type { OnboardingPanel, PanelState } from './transport/phone-protocol.ts';
@@ -931,16 +932,19 @@ const bridge = createPhoneBridge({
   },
 });
 
-bridge.app.get('/debug/frame', (_req, res) => {
+// The latest camera frame, for a quick look from a browser — same lock as the panel.
+const debugGuard = createGuard({ password: config.adminPassword, bridgeToken, tag: 'debug' });
+bridge.app.get('/debug/frame', debugGuard((_req, res) => {
   const jpeg = frames.latest();
   if (!jpeg) return void res.status(404).send('No frame yet');
   res.setHeader('Content-Type', 'image/jpeg');
-  res.setHeader('Cache-Control', 'no-store');
   res.send(jpeg);
-});
+}));
 
 webview = mountWebview({
   app: bridge.app,
+  password: config.adminPassword,
+  bridgeToken,
   frames,
   source: 'glasses',
   sessionState: () => live?.session.state() ?? emptyState(),

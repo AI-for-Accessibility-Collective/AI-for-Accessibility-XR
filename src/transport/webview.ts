@@ -1,5 +1,8 @@
 // The browser control panel, mounted on the phone bridge's Express app
-// (phone-bridge.ts) at /webview on the app's PUBLIC URL.
+// (phone-bridge.ts) at /webview on the app's PUBLIC URL. Every route here is
+// behind the shared guard (admin-auth.ts): it shows the glasses' live camera
+// picture and its buttons drive the guide, so a browser must give
+// ADMIN_PASSWORD (404 until one is set) and the phone app its BRIDGE_TOKEN.
 //
 // The standalone Bun demo (demo-server.ts) lives on its own port and is not
 // public, so this module re-exposes the SAME controls here: power, the A/B
@@ -16,6 +19,7 @@ import type { FrameStore } from './frames.ts';
 import type { DemoEvent, DemoSource } from './demo-server.ts';
 import type { SessionState, GuideMode } from '../runtime/session.ts';
 import { createProfileApi, type ProfileApiDeps } from './profile-api.ts';
+import { createGuard } from './admin-auth.ts';
 import type { AdaptationTag } from '../toolkit-candidates/effect.ts';
 import type { OnboardingPanel } from './phone-protocol.ts';
 
@@ -30,6 +34,10 @@ export interface ExpressLike {
 
 export interface WebviewOptions {
   app: ExpressLike;
+  // ADMIN_PASSWORD, for a browser (admin-auth.ts). Empty → every route 404s.
+  password: string;
+  // BRIDGE_TOKEN, which the phone app sends as a bearer token.
+  bridgeToken?: string;
   frames: FrameStore;
   source: DemoSource;
   sessionState: () => SessionState;
@@ -89,7 +97,12 @@ function loadDemoHtml(): string {
 }
 
 export function mountWebview(opts: WebviewOptions): WebviewHandle {
-  const { app, frames } = opts;
+  const { frames } = opts;
+  const guard = createGuard({ password: opts.password, bridgeToken: opts.bridgeToken, tag: 'webview' });
+  const app: ExpressLike = {
+    get: (path, handler) => opts.app.get(path, guard(handler)),
+    post: (path, handler) => opts.app.post(path, guard(handler)),
+  };
   const html = loadPanelHtml();
   const demoHtml = loadDemoHtml();
   const streamFps = Math.max(1, opts.streamFps ?? 8);
@@ -318,7 +331,7 @@ export function mountWebview(opts: WebviewOptions): WebviewHandle {
     res.status(r.status).json(r.body);
   });
 
-  console.log(`  [webview] control panel mounted at ${MOUNT}`);
+  console.log(`  [webview] control panel mounted at ${MOUNT} (${opts.password ? 'password protected' : 'off for browsers until ADMIN_PASSWORD is set'})`);
 
   return {
     emit,

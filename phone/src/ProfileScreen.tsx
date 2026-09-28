@@ -13,14 +13,15 @@ import { Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, View } from '
 import type { ProfileNeedView, ProfileView } from '../../src/transport/phone-protocol.ts';
 import { Button, Card, Segmented } from './components';
 import { radius, space, type, usePalette } from './theme';
-import { SERVER_URL } from './useGuideLink';
+import { BRIDGE_TOKEN, SERVER_URL } from './useGuideLink';
 
 const PROFILE_URL = `${SERVER_URL}/webview/profile`;
 
 async function call(path: string, body?: unknown): Promise<ProfileView> {
   const res = await fetch(`${PROFILE_URL}${path}`, {
     method: body === undefined ? 'GET' : 'POST',
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    // /webview is locked (admin-auth.ts on the server); the phone gets in with its bridge token.
+    headers: { authorization: `Bearer ${BRIDGE_TOKEN}`, ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as ProfileView & { error?: string };

@@ -16,8 +16,9 @@ import type { DownMessage, FramesUsed, GuideModeWire, PanelState, UpMessage } fr
 
 const PHONE_WS_PATH = '/phone'; // = PHONE_WS_PATH in phone-protocol.ts (a type-only import can't carry it)
 
-export const SERVER_URL = (process.env.EXPO_PUBLIC_SERVER_URL || 'https://a11y.attunemitserver.dev').replace(/\/+$/, '');
-const TOKEN = process.env.EXPO_PUBLIC_BRIDGE_TOKEN || '';
+// Both come from phone/.env (see phone/.env.example) and are baked in at build time.
+export const SERVER_URL = (process.env.EXPO_PUBLIC_SERVER_URL || '').replace(/\/+$/, '');
+export const BRIDGE_TOKEN = process.env.EXPO_PUBLIC_BRIDGE_TOKEN || '';
 
 const PING_MS = 20_000;
 const RECONNECT_MS = [1000, 2000, 5000, 10_000];
@@ -367,7 +368,7 @@ export function useGuideLink(glasses: { connected: boolean; wifi: boolean | null
       const ws = new WebSocket(SERVER_URL.replace(/^http/, 'ws') + PHONE_WS_PATH);
       ws.binaryType = 'arraybuffer';
       wsRef.current = ws;
-      ws.onopen = () => send({ t: 'hello', token: TOKEN, app: 'Wearable Task Guide phone' });
+      ws.onopen = () => send({ t: 'hello', token: BRIDGE_TOKEN, app: 'Wearable Task Guide phone' });
       ws.onmessage = (ev) => {
         if (typeof ev.data !== 'string') return;
         try {

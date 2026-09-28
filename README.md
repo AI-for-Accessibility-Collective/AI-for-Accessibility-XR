@@ -60,9 +60,10 @@ glasses ────────── camera, over Wi-Fi ───────�
   plays the guide's voice (the phone routes it to the glasses speaker), and
   tells the glasses where to send their camera. It replaces the Mentra app for
   this demo — Mentra's cloud SDK, developer console and tunnels are not used.
-- The **guide server** (this repo's `src/`) runs behind
-  **https://a11y.attunemitserver.dev** (GCP VM `attune-server`). It turns speech
-  into text, runs Gemini and the toolkit, and makes the voice.
+- The **guide server** (this repo's `src/`) runs on a server of your own
+  (ours is a small GCP VM, nginx in front for HTTPS; its name and URL live in
+  this repo's `.env`, see `.env.example`). It turns speech into text, runs
+  Gemini and the toolkit, and makes the voice.
 
 ### One-time setup
 
@@ -79,6 +80,7 @@ glasses ────────── camera, over Wi-Fi ───────�
    | Key | Value |
    |---|---|
    | `BRIDGE_TOKEN` | the shared secret the phone app must present |
+   | `ADMIN_PASSWORD` | what a browser is asked for at `/webview` and `/webview/runs` |
    | `RTMP_HOST` | the server's public IP — the glasses publish RTMP straight to it |
    | `PORT`, `RTMP_PORT`, `DEMO_PORT` | 3700, 1936 (open in the GCP firewall), 3701 |
 
@@ -88,7 +90,7 @@ glasses ────────── camera, over Wi-Fi ───────�
    ```bash
    cd phone
    bun install
-   cp .env.example .env      # set EXPO_PUBLIC_BRIDGE_TOKEN to the server's BRIDGE_TOKEN
+   cp .env.example .env      # the server's URL, and its BRIDGE_TOKEN
    bun run ios:release       # or: bun run android:release
    ```
 
@@ -110,16 +112,17 @@ glasses ────────── camera, over Wi-Fi ───────�
 4. Press **▶ Start**. That one switch turns on Gemini, the camera and the
    microphone. When it says *Ready — Wearable Task Guide listening*, speak.
    **Baseline / Toolkit**, **✓ Done** and **↻ Repeat** are on the same screen,
-   and on https://a11y.attunemitserver.dev/webview for a second person.
+   and at `/webview` on the server's URL for a second person (it asks for
+   `ADMIN_PASSWORD`).
 
 ```bash
-gcloud compute ssh attune-server --zone=us-east1-b     # then, on the server:
+gcloud compute ssh "$DEPLOY_VM" --zone="$DEPLOY_ZONE"  # then, on the server:
 journalctl -u wearable-a11y -f                         # logs: phone, camera, every status change
 sudo systemctl stop wearable-a11y                      # off for good (■ Stop only restarts it)
 ```
 
 To see what the glasses see, tunnel the demo page (it isn't public):
-`gcloud compute ssh attune-server --zone=us-east1-b -- -L 3701:localhost:3701`,
+`gcloud compute ssh "$DEPLOY_VM" --zone="$DEPLOY_ZONE" -- -L 3701:localhost:3701`,
 then open http://localhost:3701.
 
 The guide does not listen while it is speaking (so it never hears itself):

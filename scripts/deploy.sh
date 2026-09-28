@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
-# Push this app + the sibling toolkit to the server behind
-# https://a11y.attunemitserver.dev and restart it (README §2).
-# The server's .env and data/ are never touched — edit those over ssh.
+# Push this app + the sibling toolkit to the server behind PUBLIC_URL and
+# restart it (README §2). Where that is comes from this repo's .env (never
+# committed): DEPLOY_VM and DEPLOY_ZONE name the GCP VM, PUBLIC_URL is what
+# nginx answers on. The server's own .env and data/ are never touched — edit
+# those over ssh.
 set -euo pipefail
 
-VM=attune-server
-ZONE=us-east1-b
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+env_value() { grep -E "^$1=" "$HERE/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"' ; }
+VM=$(env_value DEPLOY_VM)
+ZONE=$(env_value DEPLOY_ZONE)
+URL=$(env_value PUBLIC_URL)
+[ -n "$VM" ] && [ -n "$ZONE" ] && [ -n "$URL" ] || { echo "set DEPLOY_VM, DEPLOY_ZONE and PUBLIC_URL in $HERE/.env (see .env.example)" >&2; exit 1; }
+URL=${URL%/}
 REMOTE_DIR=a11y-toolkit            # under the server's home directory
 SERVICE=wearable-a11y
 
-cd "$(dirname "$0")/../.."         # toolkitv2/, so both siblings are in reach
+cd "$HERE/.."                      # toolkitv2/, so both siblings are in reach
 TGZ=$(mktemp -t a11y-deploy).tgz
 trap 'rm -f "$TGZ"' EXIT
 
@@ -27,5 +34,5 @@ gcloud compute ssh "$VM" --zone="$ZONE" --command="set -e
   systemctl is-active $SERVICE
   journalctl -u $SERVICE --since '-15s' --no-pager -o cat | grep '^\[wearable\]' || true"
 
-curl -s -o /dev/null -w 'https://a11y.attunemitserver.dev/webview -> %{http_code}\n' --max-time 15 \
-  https://a11y.attunemitserver.dev/webview
+# 401 is the good answer: the panel is up and asking for ADMIN_PASSWORD.
+curl -s -o /dev/null -w "$URL/webview -> %{http_code}\n" --max-time 15 "$URL/webview"
