@@ -15,8 +15,7 @@ same task is how the difference is shown (`docs/DESIGN.md`).
 ## How it uses the toolkit
 
 The toolkit knows the person. This app knows the glasses and the task. The
-toolkit does not see or speak. The app keeps no profile of its own and reads
-the toolkit's instead.
+toolkit holds the profile, and the app reads it from there.
 
 The toolkit runs inside the app as a library. The app calls it at two moments:
 
@@ -43,11 +42,11 @@ The toolkit is built in three layers. This app follows the same three.
 | Layer | What it does | Provided by |
 |---|---|---|
 | **Profile** | What the person needs: speech rate, plain language, captions | The toolkit |
-| **Surface** | Turns needs into settings for one medium. It decides and does nothing else. | The toolkit's XR surface, plus `xr-audio.ts` in this repo. The XR surface was built for headsets you look through. The add-on covers pacing, pauses and pitch. |
-| **Adapters** | Each carries out one kind of setting | This repo: prompt directives, paced delivery, voice. The toolkit's own adapters change web pages, and glasses have no page. |
+| **Surface** | Turns needs into settings for one medium. It makes the decisions, and the adapters act on them. | The toolkit's XR surface, plus `xr-audio.ts` in this repo. The XR surface was built for headsets you look through. The add-on covers pacing, pauses and pitch. |
+| **Adapters** | Each carries out one kind of setting | This repo: prompt directives, paced delivery, voice. The toolkit's own adapters are written for web pages, so glasses need their own. |
 
 The add-on surface and the adapters sit in `src/toolkit-candidates/`. That
-folder imports the toolkit and nothing else from this app, and a test checks
+folder's imports come from the toolkit and from itself, and a test checks
 this. The code was written here first and is meant to move into the toolkit.
 The folder's README lists what would move, and in what order.
 
@@ -82,7 +81,7 @@ docs/                    design, plan, runbook
 └── AI-for-Accessibility-XR/        this repo (any folder name works)
 ```
 
-## 1. Run it in your browser (no glasses needed)
+## 1. Run it in your browser
 
 ```bash
 bun install                                # links the sibling toolkit
@@ -93,9 +92,8 @@ bun run demo                               # opens on http://localhost:3001
 
 On the page:
 
-1. **Source**, then **📷 Webcam**, then **Start webcam**. For a recorded clip
-   instead, drop a `.mov` or `.mp4` into this folder and pick it from the
-   list.
+1. **Source**, then **📷 Webcam**, then **Start webcam**. For a recorded clip,
+   drop a `.mov` or `.mp4` into this folder and pick it from the list.
 2. Flip the switch to **▶ Start**. Gemini runs while it is on.
 3. Say or type *"help me start the washing machine"*. **Baseline** answers in
    one long paragraph at normal speed.
@@ -122,8 +120,7 @@ glasses ────────── camera, over Wi-Fi ───────�
   the link to the glasses. It forwards the glasses microphone to the server.
   It plays the guide's voice, which the phone routes to the glasses speaker.
   It tells the glasses where to send their camera. It stands in for the
-  Mentra app here, so Mentra's cloud SDK, developer console and tunnels are
-  not part of the setup.
+  Mentra app here, and it talks to the glasses directly over Bluetooth.
 - The **guide server** (this repo's `src/`) runs on a server of your own.
   Ours is a small GCP VM with nginx in front for HTTPS. Its name and URL go
   in this repo's `.env` (see `.env.example`). It turns speech into text, runs
@@ -185,12 +182,14 @@ journalctl -u wearable-a11y -f                         # logs: phone, camera, st
 sudo systemctl stop wearable-a11y                      # off for good (■ Stop restarts it)
 ```
 
-To see what the glasses see, tunnel the demo page, which is not public:
+To see what the glasses see, tunnel the demo page, which listens on the
+server's localhost:
 `gcloud compute ssh "$DEPLOY_VM" --zone="$DEPLOY_ZONE" -- -L 3701:localhost:3701`,
 then open http://localhost:3701.
 
-The guide does not listen while it is speaking, so it does not hear itself.
-Wait for a line to finish before saying *"done"*, or press the button.
+The guide listens between its own lines, so its voice stays out of the
+microphone. Wait for a line to finish before saying *"done"*, or press the
+button.
 
 The first run on a new pair of glasses is a bring-up session
 (`docs/CHECKING.md` §6). Bluetooth audio routing, the camera stream and
@@ -200,15 +199,15 @@ hearing *"done"* in a real room are the usual things to adjust.
 
 **■ Stop** on the page, **Ctrl-C** in the terminal, or **`bun run stop`**
 from any terminal. Each turns Gemini off first, then shuts the app down. End a
-session with `bun run stop`. It stops anything left over and confirms nothing
-can still call Gemini. On its own, the app pauses Gemini when the page is
+session with `bun run stop`. It stops anything left over and confirms Gemini
+is off. On its own, the app pauses Gemini when the page is
 closed or after 15 idle minutes, and turns it off if requests run away.
 
 ## 4. Check it
 
 ```bash
 bun run check              # everything, including a few live Gemini calls
-bun run check --offline    # no Gemini calls
+bun run check --offline    # skips the live Gemini calls
 bun run check --rig        # also plays the whole A/B take over HTTP
 bun test                   # unit tests
 bun run typecheck
